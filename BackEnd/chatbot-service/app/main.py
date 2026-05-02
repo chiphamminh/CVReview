@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from app.api.routes import chat, health, candidate_chat, hr_chat
+from app.api.routes import health, candidate_chat, hr_chat
 from app.services.embedding import embedding_service
 from app.services.qdrant import qdrant_service
 from app.config import get_settings
@@ -91,8 +91,6 @@ app.add_middleware(
 app.include_router(candidate_chat.router, prefix="/chatbot")
 app.include_router(hr_chat.router, prefix="/chatbot")
 app.include_router(health.router, prefix="/chatbot")
-# Legacy router kept for backward compatibility — will be deprecated
-app.include_router(chat.router, prefix="/chatbot/legacy")
 
 
 # Root endpoint
