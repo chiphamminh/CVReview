@@ -2,7 +2,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.rag.hr.state import HRChatState
-from app.rag.hr_tools import HR_TOOLS
+from app.rag.hr.hr_tools import HR_TOOLS
 from app.config import get_settings
 from app.rag.hr.helpers.candidate_resolver import _resolve_candidates_by_name
 

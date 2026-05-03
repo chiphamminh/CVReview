@@ -4,7 +4,9 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
 
 from app.rag.hr.state import HRChatState
 from app.services.retriever import retriever
+from app.services.embedding import embedding_service
 from app.config import get_settings
+from app.rag.shared.hybrid_retrieval import hybrid_retrieve_cv
 
 _SECTION_ORDER = ["SUMMARY", "EXPERIENCE", "SKILLS", "EDUCATION", "PROJECTS"]
 
@@ -70,6 +72,40 @@ async def _fetch_pinned_cv_context(
     return pinned
 
 
+def _build_hr_base_filters(position_id: int, source_type: str) -> List:
+    """Build the common Qdrant must-filter list for HR CV retrieval."""
+    return [
+        FieldCondition(key="positionId", match=MatchValue(value=position_id)),
+        FieldCondition(key="sourceType", match=MatchValue(value=source_type)),
+        FieldCondition(key="is_latest", match=MatchValue(value=True)),
+    ]
+
+
+def _build_candidate_base_filters(position_id: int) -> List:
+    """Build the common Qdrant must-filter list for Candidate CV retrieval."""
+    return [
+        FieldCondition(key="applied_position_ids", match=MatchAny(any=[position_id])),
+        FieldCondition(key="sourceType", match=MatchValue(value="CANDIDATE")),
+        FieldCondition(key="is_latest", match=MatchValue(value=True)),
+    ]
+
+
+async def _fetch_jd_context(
+    position_id: int,
+    query_vector: List[float],
+) -> List[Dict[str, Any]]:
+    """Fetch top JD chunks for the given position to inject into prompt context."""
+    return retriever.qdrant_service.search_similar(
+        collection_name=retriever.jd_collection,
+        query_vector=query_vector,
+        limit=3,
+        score_threshold=0.0,
+        filters=Filter(must=[
+            FieldCondition(key="positionId", match=MatchValue(value=position_id))
+        ]),
+    )
+
+
 async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
     """
     Routes to the correct retrieval strategy based on pipeline_strategy set by the router.
@@ -78,9 +114,9 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
     AGGREGATE → bypass Qdrant entirely (data comes from SQL statistics API)
     COMPARE   → pinned fetch from active_cv_ids (no rerank, full sections)
     DETAIL    → pinned fetch from active_cv_ids (no rerank, full sections)
-    RANK      → full dense retrieval via retriever
-    FILTER    → full dense retrieval via retriever
-    FIND_MORE → full dense retrieval, exclude active_cv_ids
+    RANK      → hybrid retrieval (dense + keyword → RRF → rerank)
+    FILTER    → hybrid retrieval (dense + keyword → RRF → rerank)
+    FIND_MORE → hybrid retrieval, exclude active_cv_ids via Qdrant must_not
     """
     strategy      = state.get("pipeline_strategy", "RANK")
     query         = state["query"]
@@ -122,33 +158,57 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
         }
         return state
 
-    # --- Full retrieval for RANK / FILTER / FIND_MORE ---
-    entities = state.get("query_entities", {})
-    top_n = entities.get("top_n") or _extract_top_n(query)
-    print(f"[HR Retrieve] strategy={strategy}, mode={state['mode']}, top_n={top_n}")
+    # --- Hybrid retrieval for RANK / FILTER / FIND_MORE ---
+    entities       = state.get("query_entities", {})
+    top_n          = entities.get("top_n") or _extract_top_n(query)
+    expanded_query = state.get("expanded_query") or query
+    skill_variants = state.get("skill_variants") or []
+    position_id    = state["position_id"]
+
+    # FIND_MORE passes the currently active CV IDs as exclusion list
+    exclude_ids: List[int] = active_cv_ids if strategy == "FIND_MORE" else []
+
+    print(
+        f"[HR Retrieve] strategy={strategy}, mode={state['mode']}, top_n={top_n}"
+        f" | expanded='{expanded_query[:60]}...' | variants={len(skill_variants)}"
+        f" | exclude={len(exclude_ids)} id(s)"
+    )
 
     if state["mode"] == "HR_MODE":
-        result = await retriever.retrieve_for_hr_mode_hr(
-            query=query,
-            position_id=state["position_id"],
-            top_n=top_n,
-        )
+        base_filters = _build_hr_base_filters(position_id, source_type="HR")
     else:
-        result = await retriever.retrieve_for_hr_mode_candidate(
-            query=query,
-            position_id=state["position_id"],
-            top_n=top_n,
-        )
+        base_filters = _build_candidate_base_filters(position_id)
 
-    state["cv_context"]      = result.get("cv_context", [])
-    state["jd_context"]      = result.get("jd_context", [])
-    state["retrieval_stats"] = result.get("retrieval_stats", {})
+    cv_results = await hybrid_retrieve_cv(
+        query=expanded_query,
+        skill_variants=skill_variants,
+        base_filters=base_filters,
+        top_n=top_n,
+        exclude_cv_ids=exclude_ids if exclude_ids else None,
+    )
 
-    # Persist active_cv_ids for follow-up COMPARE / DETAIL / FIND_MORE turns
+    # Fetch JD context using the original (unexpanded) query vector for prompt relevance
+    query_vector = embedding_service.embed_text(query, is_query=True)
+    jd_results   = await _fetch_jd_context(position_id, query_vector)
+
+    state["cv_context"]      = cv_results
+    state["jd_context"]      = jd_results
+    state["retrieval_stats"] = {
+        "strategy":               strategy,
+        "cv_unique_ids_returned": len({c.get("payload", {}).get("cvId") for c in cv_results}),
+        "jd_chunks_retrieved":    len(jd_results),
+        "top_n_requested":        top_n,
+        "skill_variants_used":    skill_variants,
+        "excluded_cv_ids":        exclude_ids,
+    }
+
+    # Persist active_cv_ids for follow-up COMPARE / DETAIL turns.
+    # FIND_MORE intentionally keeps the OLD active_cv_ids so the next COMPARE
+    # still covers all candidates seen so far (both original + newly found).
     if strategy != "FIND_MORE":
         new_active_ids = list({
             chunk.get("payload", {}).get("cvId")
-            for chunk in state["cv_context"]
+            for chunk in cv_results
             if chunk.get("payload", {}).get("cvId") is not None
         })
         state["active_cv_ids"] = new_active_ids

@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 
-from app.rag.candidate_graph import candidate_chatbot
+from app.rag.candidate.candidate_graph import candidate_chatbot
 from app.services.recruitment_api import recruitment_api
 
 router = APIRouter()

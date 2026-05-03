@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Literal, Dict, Any
 
-from app.rag.hr_graph import hr_chatbot
+from app.rag.hr.hr_graph import hr_chatbot
 from app.services.recruitment_api import recruitment_api
 
 router = APIRouter()
