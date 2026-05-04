@@ -1,41 +1,45 @@
 """
 LangGraph workflow for the Candidate chatbot.
 
-Graph topology (Sprint 1 — legacy intent routing, to be replaced by
-candidate/router.py in Sprint 2):
+Graph topology (Sprint 2 — Intent-Aware Routing + Hybrid Retrieval):
 
   load_session_history
           │
-  classify_intent
+  route_candidate_intent      ← Hard-rule router (pure function, zero LLM cost)
           │
-    ┌─────┴──────┐
-    ▼            ▼
-retrieve_context  build_prompts (skip_retrieve path)
-    │            │
-  scoring        │
-    └────────────┘
-          │
-    build_prompts
-          │
-    llm_reasoning
-          │
-      save_turn
-          │
-   format_response → END
-
-Phase 4 features preserved:
-  - Multi-dimensional scoring (scoring_node) with POOR_FIT guardrail.
-  - Tầng 1 hard-rule apply-intent detection (session_node).
-  - Dual-mode JD retrieval (Mode A full-JD / Mode B chunk cache).
-  - scored_jobs cache persisted via functionCall field for cross-turn restore.
+          ├─ STATUS_CHECK / APPLY ─────────────────────────────────┐
+          │    (bypass Qdrant; retrieval node sets cv_context=[])   │
+          │                                                          │
+          ├─ CV_ANALYSIS ──────────────────────────────────────────┤
+          │    (CV chunks only, no expansion)                        │
+          │                                                          │
+          ├─ JD_CONVERSE / JD_ANALYSIS ────────────────────────────┤
+          │    (JD chunks only, no expansion)                        │
+          │                                                          │
+          └─ JD_SEARCH ──────────────────────────────────────────── ┤
+               │                                                     │
+          query_expansion   ← LLM Flash (synonym expand, ~50-100ms) │
+               │                                                     │
+          retrieve_context ←───────────────────────────────────────┘
+               │
+             scoring      (JD_SEARCH Turn 1 only; cache skips)
+               │
+          build_prompts
+               │
+          llm_reasoning
+               │
+           save_turn
+               │
+        format_response → END
 """
 
-from typing import Optional, Dict, Any
+from typing import Literal, Optional, Dict, Any
 from langgraph.graph import StateGraph, END
 
 from app.rag.candidate.state import CandidateChatState
+from app.rag.candidate.router import route_candidate_intent_node
 from app.rag.candidate.nodes.session import load_session_history_node
-from app.rag.candidate.nodes.intent import classify_intent_node, should_retrieve
+from app.rag.candidate.nodes.expansion import query_expansion_node
 from app.rag.candidate.nodes.retrieval import retrieve_context_node
 from app.rag.candidate.nodes.scoring import scoring_node
 from app.rag.candidate.nodes.prompts import build_prompts_node
@@ -44,27 +48,39 @@ from app.rag.candidate.nodes.persistence import save_turn_node
 from app.rag.candidate.nodes.formatting import format_response_node
 
 
+def _route_after_router(state: CandidateChatState) -> Literal["query_expansion", "retrieve_context"]:
+    """Branch to expansion only for JD_SEARCH; all other strategies skip directly to retrieval."""
+    if state.get("pipeline_strategy") == "JD_SEARCH":
+        return "query_expansion"
+    return "retrieve_context"
+
+
 def create_candidate_graph():
     workflow = StateGraph(CandidateChatState)
 
-    workflow.add_node("load_session_history", load_session_history_node)
-    workflow.add_node("classify_intent",      classify_intent_node)
-    workflow.add_node("retrieve_context",     retrieve_context_node)
-    workflow.add_node("scoring",              scoring_node)
-    workflow.add_node("build_prompts",        build_prompts_node)
-    workflow.add_node("llm_reasoning",        llm_reasoning_node)
-    workflow.add_node("save_turn",            save_turn_node)
-    workflow.add_node("format_response",      format_response_node)
+    workflow.add_node("load_session_history",    load_session_history_node)
+    workflow.add_node("route_candidate_intent",  route_candidate_intent_node)
+    workflow.add_node("query_expansion",         query_expansion_node)
+    workflow.add_node("retrieve_context",        retrieve_context_node)
+    workflow.add_node("scoring",                 scoring_node)
+    workflow.add_node("build_prompts",           build_prompts_node)
+    workflow.add_node("llm_reasoning",           llm_reasoning_node)
+    workflow.add_node("save_turn",               save_turn_node)
+    workflow.add_node("format_response",         format_response_node)
 
     workflow.set_entry_point("load_session_history")
-    workflow.add_edge("load_session_history", "classify_intent")
+    workflow.add_edge("load_session_history", "route_candidate_intent")
 
     workflow.add_conditional_edges(
-        "classify_intent",
-        should_retrieve,
-        {"retrieve": "retrieve_context", "skip_retrieve": "build_prompts"},
+        "route_candidate_intent",
+        _route_after_router,
+        {
+            "query_expansion":  "query_expansion",
+            "retrieve_context": "retrieve_context",
+        },
     )
 
+    workflow.add_edge("query_expansion", "retrieve_context")
     workflow.add_edge("retrieve_context", "scoring")
     workflow.add_edge("scoring",          "build_prompts")
     workflow.add_edge("build_prompts",    "llm_reasoning")
@@ -93,13 +109,24 @@ class CandidateChatbot:
             "cv_id":                cv_id,
             "jd_id":                None,
             "conversation_history": [],
-            "active_position_ids":  [],
+            "active_position_ids":  None,
             "position_ref_map":     {},
             "cv_context":           [],
             "jd_context":           [],
             "retrieval_stats":      {},
             "scored_jobs":          None,
+            # Router fields
+            "pipeline_strategy":    "",
+            "query_intent":         "",
+            "query_entities":       {},
+            "expanded_query":       None,
+            "skill_variants":       [],
+            # Legacy fields (for scoring/prompts backward compat)
+            "intent":               "general",
+            "intent_confidence":    0.0,
+            "domain":               "candidate",
             "is_apply_intent":      False,
+            # LLM pipeline
             "system_prompt":        "",
             "user_prompt":          "",
             "llm_response":         "",

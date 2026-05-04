@@ -1,25 +1,47 @@
-from app.rag.hr.router import _extract_top_n
-from typing import List, Dict, Any
+"""
+Node: Context Retrieval for HR Chatbot.
+
+Routes to the correct retrieval strategy based on pipeline_strategy set by
+route_hr_intent_node. Each strategy fetches a different mix of CV / JD context
+to minimise Qdrant round-trips and LLM token spend.
+
+Strategy routing:
+  ACTION    → bypass Qdrant entirely (email/confirm flow)
+  AGGREGATE → bypass Qdrant entirely (SQL statistics)
+  COMPARE   → pinned fetch from active_cv_ids via Qdrant scroll API (no rerank)
+  DETAIL    → pinned fetch from active_cv_ids via Qdrant scroll API (no rerank)
+  RANK      → hybrid retrieval (dense + keyword → RRF → cross-encoder rerank)
+  FILTER    → hybrid retrieval (dense + keyword → RRF → cross-encoder rerank)
+  FIND_MORE → hybrid retrieval, exclude active_cv_ids via Qdrant must_not
+"""
+
+from typing import List, Dict, Any, Optional
+
 from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
 
 from app.rag.hr.state import HRChatState
+from app.rag.hr.router import _extract_top_n
+from app.rag.shared.hybrid_retrieval import hybrid_retrieve_cv
 from app.services.retriever import retriever
 from app.services.embedding import embedding_service
 from app.config import get_settings
-from app.rag.shared.hybrid_retrieval import hybrid_retrieve_cv
-
-_SECTION_ORDER = ["SUMMARY", "EXPERIENCE", "SKILLS", "EDUCATION", "PROJECTS"]
 
 settings = get_settings()
 
-def normalize_section(section: str) -> str:
-    s = section.upper()
+# Canonical section display order for "virtual full CV" assembly (COMPARE/DETAIL).
+_SECTION_ORDER = ["SUMMARY", "EXPERIENCE", "SKILLS", "EDUCATION", "PROJECTS"]
 
+
+def _normalize_section(section: str) -> str:
+    s = section.upper()
     if s == "PROJECTS" or s.startswith("PROJECT_"):
         return "PROJECTS"
-
     return s
 
+
+# ---------------------------------------------------------------------------
+# Pinned fetch — COMPARE / DETAIL (FIX BUG #2: scroll API, no zero-vector)
+# ---------------------------------------------------------------------------
 
 async def _fetch_pinned_cv_context(
     cv_ids: List[int],
@@ -27,68 +49,83 @@ async def _fetch_pinned_cv_context(
     cv_collection: str,
 ) -> List[Dict[str, Any]]:
     """
-    Pinned fetch: retrieve all chunks for given cvIds directly by ID filter.
-    No reranking. Sections are assembled in canonical order (virtual full CV).
-    Used for COMPARE / DETAIL pipeline strategies.
-    """
-    MAX_CHUNKS_PER_CV = 12  # Higher cap for COMPARE so LLM has enough content
+    Pinned fetch: retrieve all chunks for given cvIds using Qdrant scroll API.
 
-    results = qdrant_svc.search_similar(
+    BUG #2 FIX: The previous implementation called search_similar() with a
+    zero-vector of hardcoded length 1024, while the collection was indexed at
+    EMBEDDING_DIMENSION (e.g. 384 for BGE-small). This caused a Qdrant dimension
+    mismatch exception and crashed every COMPARE/DETAIL turn.
+
+    scroll() is the correct API for "fetch by filter without semantic ranking" —
+    it does not require a query vector at all, avoids dimension coupling, and
+    does not compute cosine similarity (saving Qdrant CPU).
+
+    Sections are assembled in canonical order to form a "virtual full CV"
+    per plan §6 ("Virtual Full CV für COMPARE/DETAIL").
+    """
+    MAX_CHUNKS_PER_CV = 12  # Higher cap than RANK (6) — COMPARE needs full sections
+
+    results, _ = qdrant_svc.get_client().scroll(
         collection_name=cv_collection,
-        query_vector=[0.0] * settings.EMBEDDING_DIMENSION,
-        limit=len(cv_ids) * MAX_CHUNKS_PER_CV,
-        score_threshold=0.0,
-        filters=Filter(must=[
+        scroll_filter=Filter(must=[
             FieldCondition(key="cvId", match=MatchAny(any=cv_ids)),
             FieldCondition(key="is_latest", match=MatchValue(value=True)),
         ]),
+        limit=len(cv_ids) * MAX_CHUNKS_PER_CV,
+        with_payload=True,
+        with_vectors=False,  # no vector needed — saves bandwidth
     )
 
-    # Group by cvId
+    raw_chunks = [{"id": r.id, "score": 1.0, "payload": r.payload} for r in results]
+
+    # Group by cvId then sort each group in canonical section order
     grouped: Dict[int, List[Dict[str, Any]]] = {}
-    for chunk in results:
+    for chunk in raw_chunks:
         cv_id = chunk.get("payload", {}).get("cvId")
         if cv_id is not None:
             grouped.setdefault(cv_id, []).append(chunk)
 
-    # Assemble in canonical section order (virtual full CV)
     pinned: List[Dict[str, Any]] = []
-    for cv_id in cv_ids:
-        raw_chunks = grouped.get(cv_id, [])
+    for cv_id in cv_ids:  # preserve caller's cv_id order
+        raw = grouped.get(cv_id, [])
         ordered = sorted(
-            raw_chunks,
-            key=lambda c: _SECTION_ORDER.index(
-                normalize_section(
-                    c.get("payload", {}).get("section", "")
-                )
-            )
-            if normalize_section(
-                c.get("payload", {}).get("section", "")
-            ) in _SECTION_ORDER
-            else 99,
+            raw,
+            key=lambda c: (
+                _SECTION_ORDER.index(_normalize_section(c.get("payload", {}).get("section", "")))
+                if _normalize_section(c.get("payload", {}).get("section", "")) in _SECTION_ORDER
+                else 99
+            ),
         )
         pinned.extend(ordered[:MAX_CHUNKS_PER_CV])
 
     return pinned
 
 
-def _build_hr_base_filters(position_id: int, source_type: str) -> List:
-    """Build the common Qdrant must-filter list for HR CV retrieval."""
+# ---------------------------------------------------------------------------
+# Base filter builders
+# ---------------------------------------------------------------------------
+
+def _build_hr_base_filters(position_id: int) -> List:
+    """Must-filters for HR-uploaded CVs (HR_MODE)."""
     return [
-        FieldCondition(key="positionId", match=MatchValue(value=position_id)),
-        FieldCondition(key="sourceType", match=MatchValue(value=source_type)),
-        FieldCondition(key="is_latest", match=MatchValue(value=True)),
+        FieldCondition(key="positionId",  match=MatchValue(value=position_id)),
+        FieldCondition(key="sourceType",  match=MatchValue(value="HR")),
+        FieldCondition(key="is_latest",   match=MatchValue(value=True)),
     ]
 
 
 def _build_candidate_base_filters(position_id: int) -> List:
-    """Build the common Qdrant must-filter list for Candidate CV retrieval."""
+    """Must-filters for candidate-applied CVs (CANDIDATE_MODE)."""
     return [
         FieldCondition(key="applied_position_ids", match=MatchAny(any=[position_id])),
-        FieldCondition(key="sourceType", match=MatchValue(value="CANDIDATE")),
-        FieldCondition(key="is_latest", match=MatchValue(value=True)),
+        FieldCondition(key="sourceType",           match=MatchValue(value="CANDIDATE")),
+        FieldCondition(key="is_latest",            match=MatchValue(value=True)),
     ]
 
+
+# ---------------------------------------------------------------------------
+# JD context fetch (shared between RANK / FILTER / FIND_MORE)
+# ---------------------------------------------------------------------------
 
 async def _fetch_jd_context(
     position_id: int,
@@ -106,20 +143,19 @@ async def _fetch_jd_context(
     )
 
 
+# ---------------------------------------------------------------------------
+# Main node
+# ---------------------------------------------------------------------------
+
 async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
     """
-    Routes to the correct retrieval strategy based on pipeline_strategy set by the router.
+    Dispatch to the correct retrieval sub-strategy based on pipeline_strategy.
 
-    ACTION    → bypass Qdrant entirely (cv_context=[], jd_context=[])
-    AGGREGATE → bypass Qdrant entirely (data comes from SQL statistics API)
-    COMPARE   → pinned fetch from active_cv_ids (no rerank, full sections)
-    DETAIL    → pinned fetch from active_cv_ids (no rerank, full sections)
-    RANK      → hybrid retrieval (dense + keyword → RRF → rerank)
-    FILTER    → hybrid retrieval (dense + keyword → RRF → rerank)
-    FIND_MORE → hybrid retrieval, exclude active_cv_ids via Qdrant must_not
+    RANK, FILTER, FIND_MORE now route through hybrid_retrieve_cv() (dense + keyword RRF)
+    instead of the legacy dense-only retriever.
+    expanded_query and skill_variants written by query_expansion_node are consumed here.
     """
     strategy      = state.get("pipeline_strategy", "RANK")
-    query         = state["query"]
     active_cv_ids = state.get("active_cv_ids") or []
 
     # --- Strategies that bypass Qdrant entirely ---
@@ -131,41 +167,45 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
         return state
 
     # --- Pinned fetch for COMPARE / DETAIL ---
-    if strategy in ("COMPARE", "DETAIL") and not active_cv_ids:
-        state["cv_context"]      = []
-        state["jd_context"]      = []
-        state["retrieval_stats"] = {"strategy": strategy, "note": "no_active_cv_ids"}
-        state["llm_response"]    = (
-            "Không có ứng viên nào đang được theo dõi trong phiên này. "
-            "Vui lòng tìm kiếm ứng viên trước khi thực hiện so sánh hoặc xem chi tiết."
-        )
-        print(f"[HR Retrieve] {strategy} requested but active_cv_ids is empty — early return")
-        return state
+    if strategy in ("COMPARE", "DETAIL"):
+        if not active_cv_ids:
+            state["cv_context"]      = []
+            state["jd_context"]      = []
+            state["retrieval_stats"] = {"strategy": strategy, "note": "no_active_cv_ids"}
+            state["llm_response"]    = (
+                "Không có ứng viên nào đang được theo dõi trong phiên này. "
+                "Vui lòng tìm kiếm ứng viên trước khi thực hiện so sánh hoặc xem chi tiết."
+            )
+            print(f"[HR Retrieve] {strategy} requested but active_cv_ids is empty — early return")
+            return state
 
-    if strategy in ("COMPARE", "DETAIL") and active_cv_ids:
-        print(f"[HR Retrieve] strategy={strategy} → Pinned fetch for {len(active_cv_ids)} CV(s)")
+        print(f"[HR Retrieve] strategy={strategy} → Pinned scroll fetch for {len(active_cv_ids)} CV(s)")
         cv_chunks = await _fetch_pinned_cv_context(
             cv_ids=active_cv_ids,
             qdrant_svc=retriever.qdrant_service,
             cv_collection=retriever.cv_collection,
         )
         state["cv_context"]      = cv_chunks
-        state["jd_context"]      = []   # JD not needed for compare/detail — saves tokens
+        state["jd_context"]      = []  # JD not needed for compare/detail — saves tokens
         state["retrieval_stats"] = {
-            "strategy": "pinned_cv_fetch",
-            "cv_ids": active_cv_ids,
+            "strategy":      "pinned_scroll_fetch",
+            "cv_ids":        active_cv_ids,
             "chunks_fetched": len(cv_chunks),
         }
         return state
 
-    # --- Hybrid retrieval for RANK / FILTER / FIND_MORE ---
+    # --- Hybrid retrieval for RANK / FILTER / FIND_MORE (ISSUE #3 fixed) ---
+    query          = state["query"]
     entities       = state.get("query_entities", {})
     top_n          = entities.get("top_n") or _extract_top_n(query)
-    expanded_query = state.get("expanded_query") or query
-    skill_variants = state.get("skill_variants") or []
     position_id    = state["position_id"]
 
-    # FIND_MORE passes the currently active CV IDs as exclusion list
+    # Consume expanded_query + skill_variants written by query_expansion_node.
+    # If expansion was skipped (passthrough), these fall back to the original values.
+    expanded_query = state.get("expanded_query") or query
+    skill_variants = state.get("skill_variants") or []
+
+    # FIND_MORE passes currently active CV IDs as exclusion list (plan §5.3)
     exclude_ids: List[int] = active_cv_ids if strategy == "FIND_MORE" else []
 
     print(
@@ -174,11 +214,13 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
         f" | exclude={len(exclude_ids)} id(s)"
     )
 
+    # Build base filters per mode
     if state["mode"] == "HR_MODE":
-        base_filters = _build_hr_base_filters(position_id, source_type="HR")
+        base_filters = _build_hr_base_filters(position_id)
     else:
         base_filters = _build_candidate_base_filters(position_id)
 
+    # ---- HYBRID RETRIEVAL (dense + keyword → RRF → cross-encoder rerank) ----
     cv_results = await hybrid_retrieve_cv(
         query=expanded_query,
         skill_variants=skill_variants,
@@ -187,12 +229,13 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
         exclude_cv_ids=exclude_ids if exclude_ids else None,
     )
 
-    # Fetch JD context using the original (unexpanded) query vector for prompt relevance
+    # Fetch JD context using the ORIGINAL query vector (not expanded) for prompt relevance.
+    # Expansion is tuned for CV recall; original query stays closer to JD section topics.
     query_vector = embedding_service.embed_text(query, is_query=True)
     jd_results   = await _fetch_jd_context(position_id, query_vector)
 
-    state["cv_context"]      = cv_results
-    state["jd_context"]      = jd_results
+    state["cv_context"] = cv_results
+    state["jd_context"] = jd_results
     state["retrieval_stats"] = {
         "strategy":               strategy,
         "cv_unique_ids_returned": len({c.get("payload", {}).get("cvId") for c in cv_results}),
@@ -203,8 +246,8 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
     }
 
     # Persist active_cv_ids for follow-up COMPARE / DETAIL turns.
-    # FIND_MORE intentionally keeps the OLD active_cv_ids so the next COMPARE
-    # still covers all candidates seen so far (both original + newly found).
+    # FIND_MORE keeps the OLD active_cv_ids so the next COMPARE covers all
+    # candidates seen so far (original + newly found) — plan §5.3.
     if strategy != "FIND_MORE":
         new_active_ids = list({
             chunk.get("payload", {}).get("cvId")

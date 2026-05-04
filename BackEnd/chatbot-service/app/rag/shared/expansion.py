@@ -13,6 +13,11 @@ Fallback behaviour (timeout > 2s or any error):
   - expanded_query = original query
   - skill_variants = skill_keywords already extracted by the router
   - Warning is logged; pipeline continues normally
+
+Note: Dedup skill_variants preserves original casing (first-seen wins).
+  Previously: {s.lower(): s for s in ...}.values() kept the LAST seen casing per key,
+  which could downcase "Java" → "java" and break case-sensitive Qdrant MatchAny.
+  Now: first-seen casing is preserved and all variants are passed through unchanged.
 """
 
 import asyncio
@@ -32,7 +37,6 @@ settings = get_settings()
 
 _EXPANSION_TIMEOUT_SECONDS = 2.0
 
-# Structured output prompt — LLM must return pure JSON, no markdown
 _EXPANSION_PROMPT_TEMPLATE = """\
 You are a technical recruitment assistant.
 
@@ -64,9 +68,8 @@ Maximum 20 items.
 
 
 def _build_flash_llm() -> ChatGoogleGenerativeAI:
-    """Build a low-temperature LLM instance optimised for structured output generation."""
     return ChatGoogleGenerativeAI(
-        model=settings.GEMINI_MODEL,  # Flash-tier model
+        model=settings.GEMINI_MODEL,
         temperature=0.1,
         max_output_tokens=512,
         google_api_key=settings.GEMINI_API_KEY,
@@ -93,14 +96,13 @@ async def _call_expansion_llm(query: str, skill_keywords: List[str]) -> Tuple[st
     raw = response.content if isinstance(response.content, str) else str(response.content)
     raw = raw.strip()
 
-    # Strip accidental markdown fences
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
 
     parsed = json.loads(raw)
 
-    expanded_query  = str(parsed.get("expanded_query") or query).strip()
-    skill_variants  = [str(s) for s in parsed.get("skill_variants") or []]
+    expanded_query = str(parsed.get("expanded_query") or query).strip()
+    skill_variants = [str(s) for s in parsed.get("skill_variants") or []]
 
     if not expanded_query:
         expanded_query = query
@@ -108,15 +110,37 @@ async def _call_expansion_llm(query: str, skill_keywords: List[str]) -> Tuple[st
     return expanded_query, skill_variants
 
 
+def _dedup_preserve_casing(items: List[str]) -> List[str]:
+    """
+    Deduplicate a list of strings case-insensitively, preserving the FIRST seen casing.
+
+    The old approach {s.lower(): s for s in items}.values() kept the
+    LAST seen value per lowercase key. This could silently downcase "Java" → "java"
+    when the LLM returned "java" after the router had already extracted "Java".
+    Qdrant MatchAny is case-sensitive, so losing correct casing causes keyword
+    search misses against payloads that store skills as "Java", "Spring Boot", etc.
+
+    This implementation keeps first-seen casing and is O(n).
+    """
+    seen_lower: set = set()
+    result: List[str] = []
+    for s in items:
+        key = s.lower()
+        if key not in seen_lower:
+            seen_lower.add(key)
+            result.append(s)
+    return result
+
+
 async def expand_query(
     query: str,
     skill_keywords: List[str],
 ) -> Tuple[str, List[str]]:
     """
-    Expand HR query into a richer search signal.
+    Expand HR/Candidate query into a richer search signal.
 
     Args:
-        query:          The original HR query string.
+        query:          The original query string.
         skill_keywords: Skills already extracted by the router's entity extraction.
 
     Returns:
@@ -124,10 +148,11 @@ async def expand_query(
         On any failure, falls back gracefully to (original query, skill_keywords).
     """
     try:
-        expanded_query, skill_variants = await _call_expansion_llm(query, skill_keywords)
+        expanded_query, llm_variants = await _call_expansion_llm(query, skill_keywords)
 
-        # Merge router-extracted keywords into skill_variants (dedup, lowercase-safe)
-        all_variants = list({s.lower(): s for s in skill_keywords + skill_variants}.values())
+        # Merge router-extracted keywords (first) + LLM variants (second).
+        # skill_keywords go first so their casing (from the raw query) wins on dedup.
+        all_variants = _dedup_preserve_casing(skill_keywords + llm_variants)
 
         print(
             f"[Expansion] OK | expanded_query='{expanded_query[:80]}...'"
@@ -142,5 +167,4 @@ async def expand_query(
     except Exception as e:
         print(f"[Expansion] Unexpected error: {e} — using fallback")
 
-    # Fallback: original query + router-extracted keywords
     return query, skill_keywords

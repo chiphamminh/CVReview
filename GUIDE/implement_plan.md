@@ -435,12 +435,18 @@ Tương tự HR Graph. `classify_intent_node` + `should_retrieve` edge bị **re
 ## 13. Trạng thái hiện tại (cập nhật khi progress)
 
 - [x] Planning & Architecture design hoàn thành
-- [ ] Sprint 1 — Bước 1: Tách hr/state.py
-- [ ] Sprint 1 — Bước 2: Tách hr/helpers/
-- [ ] Sprint 1 — Bước 3: Tách hr/nodes/
-- [ ] Sprint 1 — Bước 4: Build hr/router.py
-- [ ] Sprint 1 — Bước 5: Wire Router vào hr/graph.py
-- [ ] Sprint 2 — Bước 6-11
+- [x] Sprint 1 — Bước 1: Tách hr/state.py
+- [x] Sprint 1 — Bước 2: Tách hr/helpers/
+- [x] Sprint 1 — Bước 3: Tách hr/nodes/
+- [x] Sprint 1 — Bước 4: Build hr/router.py
+- [x] Sprint 1 — Bước 5: Wire Router vào hr/graph.py
+- [x] Sprint 2 — Bước 6: Build shared/hybrid_retrieval.py
+- [x] Sprint 2 — Bước 7: Build shared/expansion.py
+- [x] Sprint 2 — Bước 8: Build hr/nodes/expansion.py
+- [x] Sprint 2 — Bước 9: Refactor hr/nodes/retrieval.py (hybrid)
+- [x] Sprint 2 — Refactor: Tách candidate_graph → candidate/ package
+- [x] Sprint 2 — Bước 10: Build candidate/router.py
+- [x] Sprint 2 — Bước 11: Wire Candidate graph (router + expansion + refactored retrieval)
 - [ ] Sprint 3 — Bước 12-15
 
 ---

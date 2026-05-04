@@ -18,7 +18,8 @@ from app.config import get_settings
 settings = get_settings()
 
 _APPLY_PATTERNS = re.compile(
-    r"\b(apply|nộp đơn|nop don|ứng tuyển|ung tuyen|finalize|submit.*application|i want to apply|giúp tôi apply|help me apply)\b",
+    r"\b(apply|nộp đơn|nop don|ứng tuyển|ung tuyen|finalize|submit.*application"
+    r"|i want to apply|giúp tôi apply|help me apply)\b",
     re.IGNORECASE,
 )
 
@@ -50,7 +51,8 @@ async def load_session_history_node(state: CandidateChatState) -> CandidateChatS
                             if isinstance(func_data, dict) and "scored_jobs" in func_data:
                                 state["scored_jobs"] = func_data["scored_jobs"]
                                 print(
-                                    f"[Cache Hit] Restored {len(state['scored_jobs'])} scored jobs from history."
+                                    f"[Cache Hit] Restored {len(state['scored_jobs'])} "
+                                    f"scored jobs from history."
                                 )
                                 break
                         except json.JSONDecodeError:
@@ -62,14 +64,28 @@ async def load_session_history_node(state: CandidateChatState) -> CandidateChatS
 
     async def _get_active_positions():
         try:
-            return await recruitment_api.get_active_positions()
+            positions = await recruitment_api.get_active_positions()
+            return positions, True
         except Exception as e:
             print(f"[API Error] Could not load active positions: {e}")
-            return []
+            return [], False
 
-    history, positions = await asyncio.gather(_get_history(), _get_active_positions())
-    state["conversation_history"] = history
-    state["active_position_ids"] = [p["id"] for p in positions]
+    history_result, positions_result = await asyncio.gather(
+        _get_history(),
+        _get_active_positions(),
+    )
+
+    positions, positions_ok = positions_result
+    state["conversation_history"] = history_result
+
+    if positions_ok:
+        state["active_position_ids"] = [p["id"] for p in positions]
+    else:
+        state["active_position_ids"] = None
+        print(
+            "[Session] WARNING: active_position_ids set to None "
+            "(get_active_positions failed) — active-position guard will be skipped"
+        )
 
     ref_map: Dict[int, str] = {}
     for p in positions:
