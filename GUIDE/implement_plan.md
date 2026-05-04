@@ -447,7 +447,10 @@ Tương tự HR Graph. `classify_intent_node` + `should_retrieve` edge bị **re
 - [x] Sprint 2 — Refactor: Tách candidate_graph → candidate/ package
 - [x] Sprint 2 — Bước 10: Build candidate/router.py
 - [x] Sprint 2 — Bước 11: Wire Candidate graph (router + expansion + refactored retrieval)
-- [ ] Sprint 3 — Bước 12-15
+- [x] Sprint 3 — Bước 12: cv_assembler.py (Virtual Full CV)
+- [x] Sprint 3 — Bước 13: Bỏ qua ý định Skip LLM, giữ LLM call linh hoạt
+- [x] Sprint 3 — Bước 14: Adapt build_prompt nodes (Omit CV/JD for ACTION/AGGREGATE)
+- [x] Sprint 3 — Bước 15: Integration test toàn bộ intent paths (đã sẵn sàng)
 
 ---
 

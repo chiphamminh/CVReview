@@ -25,22 +25,12 @@ from app.rag.shared.hybrid_retrieval import hybrid_retrieve_cv
 from app.services.retriever import retriever
 from app.services.embedding import embedding_service
 from app.config import get_settings
+from app.rag.hr.helpers.cv_assembler import assemble_virtual_full_cv
 
 settings = get_settings()
 
-# Canonical section display order for "virtual full CV" assembly (COMPARE/DETAIL).
-_SECTION_ORDER = ["SUMMARY", "EXPERIENCE", "SKILLS", "EDUCATION", "PROJECTS"]
-
-
-def _normalize_section(section: str) -> str:
-    s = section.upper()
-    if s == "PROJECTS" or s.startswith("PROJECT_"):
-        return "PROJECTS"
-    return s
-
-
 # ---------------------------------------------------------------------------
-# Pinned fetch — COMPARE / DETAIL (FIX BUG #2: scroll API, no zero-vector)
+# Pinned fetch — COMPARE / DETAIL
 # ---------------------------------------------------------------------------
 
 async def _fetch_pinned_cv_context(
@@ -78,27 +68,11 @@ async def _fetch_pinned_cv_context(
 
     raw_chunks = [{"id": r.id, "score": 1.0, "payload": r.payload} for r in results]
 
-    # Group by cvId then sort each group in canonical section order
-    grouped: Dict[int, List[Dict[str, Any]]] = {}
-    for chunk in raw_chunks:
-        cv_id = chunk.get("payload", {}).get("cvId")
-        if cv_id is not None:
-            grouped.setdefault(cv_id, []).append(chunk)
-
-    pinned: List[Dict[str, Any]] = []
-    for cv_id in cv_ids:  # preserve caller's cv_id order
-        raw = grouped.get(cv_id, [])
-        ordered = sorted(
-            raw,
-            key=lambda c: (
-                _SECTION_ORDER.index(_normalize_section(c.get("payload", {}).get("section", "")))
-                if _normalize_section(c.get("payload", {}).get("section", "")) in _SECTION_ORDER
-                else 99
-            ),
-        )
-        pinned.extend(ordered[:MAX_CHUNKS_PER_CV])
-
-    return pinned
+    return assemble_virtual_full_cv(
+        raw_chunks=raw_chunks,
+        cv_ids=cv_ids,
+        max_chunks_per_cv=MAX_CHUNKS_PER_CV
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +168,7 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
         }
         return state
 
-    # --- Hybrid retrieval for RANK / FILTER / FIND_MORE (ISSUE #3 fixed) ---
+    # --- Hybrid retrieval for RANK / FILTER / FIND_MORE ---
     query          = state["query"]
     entities       = state.get("query_entities", {})
     top_n          = entities.get("top_n") or _extract_top_n(query)
@@ -205,7 +179,7 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
     expanded_query = state.get("expanded_query") or query
     skill_variants = state.get("skill_variants") or []
 
-    # FIND_MORE passes currently active CV IDs as exclusion list (plan §5.3)
+    # FIND_MORE passes currently active CV IDs as exclusion list
     exclude_ids: List[int] = active_cv_ids if strategy == "FIND_MORE" else []
 
     print(
@@ -247,7 +221,7 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
 
     # Persist active_cv_ids for follow-up COMPARE / DETAIL turns.
     # FIND_MORE keeps the OLD active_cv_ids so the next COMPARE covers all
-    # candidates seen so far (original + newly found) — plan §5.3.
+    # candidates seen so far (original + newly found)
     if strategy != "FIND_MORE":
         new_active_ids = list({
             chunk.get("payload", {}).get("cvId")

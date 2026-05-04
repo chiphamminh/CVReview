@@ -32,8 +32,16 @@ def build_hr_prompts_node(state: HRChatState) -> HRChatState:
     strategy     = state.get("pipeline_strategy", "RANK")
     mode_label   = "HR Mode (sourced CVs)" if state["mode"] == "HR_MODE" else "Candidate Mode (inbound applications)"
     history_text = _format_history(state.get("conversation_history", []))
-    cv_text      = _format_cv_context(state.get("cv_context", []), state.get("cv_id_to_meta", {}))
-    jd_text      = _format_jd_context(state.get("jd_context", []))
+    cv_text = (
+        _format_cv_context(state.get("cv_context", []), state.get("cv_id_to_meta", {}))
+        if strategy not in ("ACTION", "AGGREGATE")
+        else ""
+    )
+    jd_text = (
+        _format_jd_context(state.get("jd_context", []))
+        if strategy not in ("ACTION", "AGGREGATE")
+        else ""
+    )
     sql_text     = _format_sql_metadata(state.get("sql_metadata", []), state["mode"])
 
     position_name = "Unknown Position"
@@ -43,6 +51,10 @@ def build_hr_prompts_node(state: HRChatState) -> HRChatState:
             if name:
                 position_name = name
                 break
+
+    if position_name == "Unknown Position" and state.get("sql_metadata"):
+        first = state["sql_metadata"][0]
+        position_name = first.get("positionName") or first.get("position", "Unknown Position")
 
     pending_emails = state.get("pending_emails")
     pending_note   = ""
@@ -73,18 +85,13 @@ def build_hr_prompts_node(state: HRChatState) -> HRChatState:
         f"{_ADAPTIVE_INSTRUCTION}{strategy_hint}{pending_note}"
     )
 
-    # Build user prompt — only inject JD block when it has content (saves tokens on COMPARE/DETAIL/ACTION)
-    if state.get("jd_context"):
-        user_prompt = (
-            f"## Conversation History:\n{history_text or '(New session)'}\n\n"
-            f"## Job Description Context:\n{jd_text}\n\n"
-            f"## CV Data Retrieved from System:\n{cv_text}\n"
-        )
-    else:
-        user_prompt = (
-            f"## Conversation History:\n{history_text or '(New session)'}\n\n"
-            f"## CV Data Retrieved from System:\n{cv_text}\n"
-        )
+    # Build user prompt — omit CV/JD blocks entirely for ACTION and AGGREGATE to save tokens
+    user_prompt = f"## Conversation History:\n{history_text or '(New session)'}\n\n"
+
+    if strategy not in ("ACTION", "AGGREGATE"):
+        if state.get("jd_context"):
+            user_prompt += f"## Job Description Context:\n{jd_text}\n\n"
+        user_prompt += f"## CV Data Retrieved from System:\n{cv_text}\n"
 
     if sql_text:
         user_prompt += f"\n## Application Records from Database:\n{sql_text}\n"
