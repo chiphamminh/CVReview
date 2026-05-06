@@ -8,6 +8,7 @@ class HRChatState(TypedDict):
     hr_id: str
     session_id: str
     position_id: int
+    position_name: str
     mode: Literal["HR_MODE", "CANDIDATE_MODE"]
 
     # Tầng 1 hard-rule flags

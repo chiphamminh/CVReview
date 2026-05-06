@@ -160,6 +160,9 @@ async def llm_hr_reasoning_node(state: HRChatState) -> HRChatState:
                 for cv_id in cv_ids_in_ctx
             ]
             print(f"[Scoring] Intercepted evaluate_candidates → {len(state['pending_scoring_candidates'])} candidate(s) queued")
+            tool_result = f"Đang tiến hành chấm điểm {len(state['pending_scoring_candidates'])} ứng viên ở background..."
+            executed_calls.append({"name": tool_name, "arguments": tool_args, "result": tool_result})
+            messages.append(ToolMessage(content=tool_result, tool_call_id=call["id"]))
             continue
 
         # All other tools — execute normally
@@ -193,5 +196,24 @@ async def llm_hr_reasoning_node(state: HRChatState) -> HRChatState:
     llm_no_tools   = _build_llm(temperature=0.3)
     final_response = await llm_no_tools.ainvoke(messages)
     state["llm_response"] = _extract_llm_text(final_response.content)
+
+    # Auto-trigger scoring if HR requested RANK or FILTER and we have fetched CVs
+    if strategy in ("RANK", "FILTER") and not state.get("pending_scoring_candidates"):
+        cv_id_to_meta  = state.get("cv_id_to_meta", {})
+        cv_ids_in_ctx: set = {
+            chunk.get("payload", {}).get("cvId")
+            for chunk in state.get("cv_context", [])
+            if chunk.get("payload", {}).get("cvId") is not None
+        }
+        if cv_ids_in_ctx:
+            state["pending_scoring_candidates"] = [
+                {
+                    "cvId":          cv_id,
+                    "appCvId":       cv_id_to_meta.get(cv_id, {}).get("appCvId"),
+                    "candidateName": cv_id_to_meta.get(cv_id, {}).get("candidateName", f"CV-{cv_id}"),
+                }
+                for cv_id in cv_ids_in_ctx
+            ]
+            print(f"[Reasoning] Auto-triggering scoring for {len(state['pending_scoring_candidates'])} candidates (strategy={strategy})")
 
     return state

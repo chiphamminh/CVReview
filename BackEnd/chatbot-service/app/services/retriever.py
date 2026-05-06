@@ -40,7 +40,7 @@ def get_adaptive_threshold(intent: str, has_specific_filter: bool) -> float:
     thresholds = {
         "cv_analysis": 0.40,
         "jd_search": 0.50,
-        "jd_analysis": 0.40,
+        "jd_analysis": 0.35,
         "general": 0.35,
         "hr_candidate": 0.30,  # position_id filter is highly specific
     }
@@ -97,6 +97,7 @@ class CareerCounselorRetriever:
         top_k: Optional[int] = None,
         score_threshold: Optional[float] = None,
         active_jd_ids: Optional[List[int]] = None,
+        skill_variants: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Candidate Chatbot: intent-based retrieval with adaptive parameters."""
         query_vector = self.embedding_service.embed_text(query, is_query=True)
@@ -120,6 +121,8 @@ class CareerCounselorRetriever:
                 jd_top_k=jd_top_k,
                 score_threshold=score_threshold,
                 active_jd_ids=active_jd_ids,
+                skill_variants=skill_variants,
+                intent=intent,
             )
 
         elif intent == "jd_analysis":
@@ -142,6 +145,8 @@ class CareerCounselorRetriever:
                     jd_top_k=min(jd_top_k, 3),
                     score_threshold=score_threshold,
                     active_jd_ids=active_jd_ids,
+                    skill_variants=skill_variants,
+                    intent=intent,
                 )
 
         elif intent == "cv_analysis":
@@ -166,6 +171,8 @@ class CareerCounselorRetriever:
         jd_top_k: int = 5,
         score_threshold: Optional[float] = None,
         active_jd_ids: Optional[List[int]] = None,
+        skill_variants: Optional[List[str]] = None,
+        intent: str = "jd_search",
     ) -> Dict[str, Any]:
         """
         Candidate Chatbot — retrieve CV context and reranked JD context.
@@ -175,8 +182,8 @@ class CareerCounselorRetriever:
         """
         has_cv_filter = cv_id is not None or candidate_id is not None
         if score_threshold is None:
-            cv_threshold = get_adaptive_threshold("jd_search", has_cv_filter)
-            jd_threshold = get_adaptive_threshold("jd_search", False)
+            cv_threshold = get_adaptive_threshold(intent, has_cv_filter)
+            jd_threshold = get_adaptive_threshold(intent, False)
         else:
             cv_threshold = jd_threshold = score_threshold
 
@@ -201,6 +208,7 @@ class CareerCounselorRetriever:
         jd_must = []
         if active_jd_ids is not None:
             jd_must.append(FieldCondition(key="positionId", match=MatchAny(any=active_jd_ids)))
+            
         jd_filter = Filter(must=jd_must) if jd_must else None
 
         jd_chunks = self.qdrant_service.search_similar(

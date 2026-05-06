@@ -21,7 +21,13 @@ _STRATEGY_HINTS: dict[str, str] = {
     "DETAIL":    "\n\nINSTRUCTION: Provide a detailed profile summary for the requested candidate. Cover technical skills, experience, education, and notable projects.",
     "ACTION":    "\n\nINSTRUCTION: Focus on the action requested (email, status update, etc.). Do NOT fetch additional candidates. Use only the metadata provided.",
     "AGGREGATE": "\n\nINSTRUCTION: Answer with exact numbers from the statistics data provided. Do NOT estimate or fabricate counts.",
-    "FIND_MORE": "\n\nINSTRUCTION: These are NEW candidates not previously shown. Introduce them freshly without referencing prior candidates.",
+    "FIND_MORE": (
+        "\n\nINSTRUCTION: These are NEW candidates not previously shown. "
+        "Base your assessment STRICTLY on the CV chunks provided in 'CV Data Retrieved' above. "
+        "A candidate does NOT need an AI score to be evaluated — read their CV text directly. "
+        "Do NOT say you lack information if CV chunks are present for a candidate. "
+        "Treat NULL/missing score as 'not yet scored' and assess from CV content alone."
+    ),
     "FILTER":    "\n\nINSTRUCTION: Filter and rank candidates according to the specified criteria. Only list candidates that match.",
     "RANK":      "",
 }
@@ -44,7 +50,8 @@ def build_hr_prompts_node(state: HRChatState) -> HRChatState:
     )
     sql_text     = _format_sql_metadata(state.get("sql_metadata", []), state["mode"])
 
-    position_name = "Unknown Position"
+    position_name = state.get("position_name", "Unknown Position")
+
     if state.get("jd_context"):
         for chunk in state["jd_context"]:
             name = chunk.get("payload", {}).get("positionName")
@@ -80,7 +87,7 @@ def build_hr_prompts_node(state: HRChatState) -> HRChatState:
         f"- When HR requests detailed candidate information, invoke the `get_candidate_details` tool.\n"
         f"- When HR asks about CV count or statistics, invoke the `get_cv_summary` tool.\n"
         f"- When HR wants to filter/rank candidates, invoke the `search_candidates_by_criteria` tool.\n"
-        f"- When HR requests to score/evaluate/chấm điểm candidates, invoke the `evaluate_candidates` tool.\n"
+        f"- When HR requests to list, filter, rank, or evaluate candidates, ALWAYS invoke the `evaluate_candidates` tool after fetching the candidates.\n"
         f"- NEVER reveal raw UUIDs or system IDs to HR in your response.\n"
         f"{_ADAPTIVE_INSTRUCTION}{strategy_hint}{pending_note}"
     )

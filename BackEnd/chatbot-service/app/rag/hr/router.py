@@ -69,19 +69,30 @@ _FILTER_PATTERN = re.compile(
 )
 
 # Skill keyword extraction — broad catch for common tech/soft skills
-_SKILL_KEYWORD_PATTERN = re.compile(
-    r"\b([A-Z][a-z]*(?:\s+[A-Z][a-z]*)*|"     # TitleCase phrases: Spring Boot, React Native
-    r"[A-Z]{2,}(?:\+{1,2}|#)?|"                # Acronyms: AWS, C++, C#
-    r"java|python|react|node\.?js|typescript|javascript|"
-    r"spring|django|fastapi|docker|kubernetes|kafka|redis|"
-    r"sql|mysql|postgresql|mongodb|elasticsearch|"
-    r"git|ci\/cd|devops|agile|scrum)\b",
-    re.IGNORECASE,
-)
+_TECH_SKILL_WHITELIST = frozenset({
+    # Languages
+    "java", "python", "javascript", "typescript", "kotlin", "swift",
+    "golang", "go", "rust", "c++", "c#", "php", "ruby", "scala",
+    # Frameworks
+    "spring", "spring boot", "spring mvc", "spring framework",
+    "django", "fastapi", "flask", "express", "nestjs",
+    "react", "angular", "vue", "next.js", "nuxt",
+    "node.js", "nodejs",
+    # Data / DB
+    "sql", "mysql", "postgresql", "mongodb", "redis", "elasticsearch",
+    "cassandra", "oracle", "sqlite", "dynamodb",
+    # DevOps / Infra
+    "docker", "kubernetes", "k8s", "kafka", "rabbitmq",
+    "aws", "gcp", "azure", "terraform", "ansible",
+    "ci/cd", "cicd", "jenkins", "github actions", "gitlab ci",
+    # Tools & Practices
+    "git", "devops", "agile", "scrum", "microservices", "restful", "graphql",
+    # Add more as needed per quarter
+})
 
 # Top-N extraction
 _TOP_N_PATTERN = re.compile(r"\b(?:top\s*)?(\d+)\b", re.IGNORECASE)
-_HR_DEFAULT_TOP_N = 10
+_HR_DEFAULT_TOP_N = 5
 
 # Score threshold extraction (e.g. "điểm >= 75", "score > 80")
 _SCORE_THRESHOLD_PATTERN = re.compile(r"(?:điểm|score|diem)\s*[>>=]+\s*(\d+)", re.IGNORECASE)
@@ -98,7 +109,16 @@ _NAME_EXTRACTION_PATTERN = re.compile(
 # ---------------------------------------------------------------------------
 
 def _extract_skill_keywords(query: str) -> List[str]:
-    return list({m.lower() for m in _SKILL_KEYWORD_PATTERN.findall(query)})
+    """
+    Whitelist-based skill extraction.
+    Uses regex word boundaries to match whitelist directly against the query.
+    """
+    query_lower = query.lower()
+    found: set = set()
+    for skill in _TECH_SKILL_WHITELIST:
+        if re.search(rf'\b{re.escape(skill)}\b', query_lower):
+            found.add(skill)
+    return list(found)
 
 
 def _extract_top_n(query: str) -> int:

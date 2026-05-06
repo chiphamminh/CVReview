@@ -36,6 +36,11 @@ from app.rag.candidate.state import CandidateChatState
 # Compiled regex patterns
 # ---------------------------------------------------------------------------
 
+_GENERAL_PATTERN = re.compile(
+    r"^(xin chào|chào|hello|hi|hey|cảm ơn|camon|ok|được rồi|.{1,15})$",
+    re.IGNORECASE
+)
+
 _APPLY_PATTERN = re.compile(
     r"\b(apply|nộp đơn|nop don|ứng tuyển|ung tuyen|finalize|submit.*application"
     r"|i want to apply|giúp tôi apply|help me apply|đăng ký|dang ky)\b",
@@ -49,11 +54,19 @@ _STATUS_CHECK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_JD_SEARCH_PATTERN = re.compile(
+    r"\b(tìm việc|tim viec|tìm công việc|tim cong viec|tìm vị trí|tim vi tri|"
+    r"công việc phù hợp|cong viec phu hop|job search|find a job|find jobs|"
+    r"có việc nào|co viec nao|việc làm|viec lam|gợi ý việc|goi y viec)\b",
+    re.IGNORECASE,
+)
+
 _CV_ANALYSIS_PATTERN = re.compile(
-    r"\b(cv của tôi|cv cua toi|kỹ năng của tôi|ky nang cua toi|profile của tôi"
-    r"|ho so cua toi|hồ sơ của tôi|điểm mạnh của tôi|diem manh cua toi"
-    r"|kinh nghiệm của tôi|kinh nghiem cua toi|my cv|my profile|my skills"
-    r"|my experience|my background|phân tích cv|phan tich cv|review cv của)\b",
+    r"\b(kỹ năng của tôi|ky nang cua toi|"
+    r"điểm mạnh của tôi|diem manh cua toi|"
+    r"kinh nghiệm của tôi|kinh nghiem cua toi|my skills|"
+    r"my experience|my background|phân tích cv|phan tich cv|review cv của|"
+    r"nhận xét cv|nhan xet cv|đánh giá cv|danh gia cv)\b",
     re.IGNORECASE,
 )
 
@@ -73,16 +86,26 @@ _JD_ANALYSIS_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Skill keyword extraction — same pattern as HR router for consistency
-_SKILL_KEYWORD_PATTERN = re.compile(
-    r"\b([A-Z][a-z]*(?:\s+[A-Z][a-z]*)*|"     # TitleCase phrases: Spring Boot
-    r"[A-Z]{2,}(?:\+{1,2}|#)?|"               # Acronyms: AWS, C++, C#
-    r"java|python|react|node\.?js|typescript|javascript|"
-    r"spring|django|fastapi|docker|kubernetes|kafka|redis|"
-    r"sql|mysql|postgresql|mongodb|elasticsearch|"
-    r"git|ci\/cd|devops|agile|scrum)\b",
-    re.IGNORECASE,
-)
+# Skill keyword extraction — broad catch for common tech/soft skills
+_TECH_SKILL_WHITELIST = frozenset({
+    # Languages
+    "java", "python", "javascript", "typescript", "kotlin", "swift",
+    "golang", "go", "rust", "c++", "c#", "php", "ruby", "scala",
+    # Frameworks
+    "spring", "spring boot", "spring mvc", "spring framework",
+    "django", "fastapi", "flask", "express", "nestjs",
+    "react", "angular", "vue", "next.js", "nuxt",
+    "node.js", "nodejs",
+    # Data / DB
+    "sql", "mysql", "postgresql", "mongodb", "redis", "elasticsearch",
+    "cassandra", "oracle", "sqlite", "dynamodb",
+    # DevOps / Infra
+    "docker", "kubernetes", "k8s", "kafka", "rabbitmq",
+    "aws", "gcp", "azure", "terraform", "ansible",
+    "ci/cd", "cicd", "jenkins", "github actions", "gitlab ci",
+    # Tools & Practices
+    "git", "devops", "agile", "scrum", "microservices", "restful", "graphql",
+})
 
 # ---------------------------------------------------------------------------
 # Mapping: pipeline_strategy → legacy intent field value
@@ -96,6 +119,7 @@ _STRATEGY_TO_LEGACY_INTENT: Dict[str, str] = {
     "APPLY":       "jd_search",   # Needs scored_jobs → same retrieval path as jd_search
     "STATUS_CHECK":"general",
     "JD_CONVERSE": "jd_analysis",
+    "GENERAL":     "general",
 }
 
 
@@ -104,7 +128,16 @@ _STRATEGY_TO_LEGACY_INTENT: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 def _extract_skill_keywords(query: str) -> List[str]:
-    return list({m.lower() for m in _SKILL_KEYWORD_PATTERN.findall(query)})
+    """
+    Whitelist-based skill extraction.
+    Uses regex word boundaries to match whitelist directly against the query.
+    """
+    query_lower = query.lower()
+    found: set = set()
+    for skill in _TECH_SKILL_WHITELIST:
+        if re.search(rf'\b{re.escape(skill)}\b', query_lower):
+            found.add(skill)
+    return list(found)
 
 
 def _extract_query_entities(query: str) -> Dict[str, Any]:
@@ -139,25 +172,35 @@ def route_candidate_intent_node(state: CandidateChatState) -> CandidateChatState
         strategy = "APPLY"
         print(f"[Candidate Router] P1 → APPLY | tầng1_flag={is_apply}")
 
-    # Priority 2a — Status check (SQL only)
+    # Priority 2b — Status check (SQL only)
     elif _STATUS_CHECK_PATTERN.search(query):
         strategy = "STATUS_CHECK"
-        print("[Candidate Router] P2a → STATUS_CHECK")
+        print("[Candidate Router] P2b → STATUS_CHECK")
 
-    # Priority 2b — CV self-analysis
+    # Priority 2c — Explicit Job Search
+    elif _JD_SEARCH_PATTERN.search(query):
+        strategy = "JD_SEARCH"
+        print("[Candidate Router] P2c → JD_SEARCH (explicit keyword)")
+
+    # Priority 2d — CV self-analysis
     elif _CV_ANALYSIS_PATTERN.search(query):
         strategy = "CV_ANALYSIS"
-        print("[Candidate Router] P2b → CV_ANALYSIS")
+        print("[Candidate Router] P2d → CV_ANALYSIS")
 
-    # Priority 2c — Specific JD conversation (benefits, culture, process)
+    # Priority 2e — Specific JD conversation (benefits, culture, process)
     elif _JD_CONVERSE_PATTERN.search(query):
         strategy = "JD_CONVERSE"
-        print("[Candidate Router] P2c → JD_CONVERSE")
+        print("[Candidate Router] P2e → JD_CONVERSE")
 
-    # Priority 2d — JD requirements analysis
+    # Priority 2f — JD requirements analysis
     elif _JD_ANALYSIS_PATTERN.search(query):
         strategy = "JD_ANALYSIS"
-        print("[Candidate Router] P2d → JD_ANALYSIS")
+        print("[Candidate Router] P2f → JD_ANALYSIS")
+
+    # Priority 2g — General short/greeting query
+    elif _GENERAL_PATTERN.match(query.strip()):
+        strategy = "GENERAL"
+        print("[Candidate Router] P2g → GENERAL (short/greeting query)")
 
     # Priority 3 — Default: full JD search + scoring pipeline
     else:

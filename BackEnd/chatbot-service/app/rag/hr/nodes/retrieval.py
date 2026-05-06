@@ -220,15 +220,29 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
     }
 
     # Persist active_cv_ids for follow-up COMPARE / DETAIL turns.
-    # FIND_MORE keeps the OLD active_cv_ids so the next COMPARE covers all
-    # candidates seen so far (original + newly found)
     if strategy != "FIND_MORE":
-        new_active_ids = list({
+        requested_n = entities.get("top_n") or _extract_top_n(query)
+        seen: set = set()
+        deduped_ids: List[int] = []
+        for chunk in cv_results:
+            cv_id = chunk.get("payload", {}).get("cvId")
+            if cv_id is not None and cv_id not in seen:
+                seen.add(cv_id)
+                deduped_ids.append(cv_id)
+                if len(deduped_ids) == requested_n:
+                    break
+        
+        state["active_cv_ids"] = deduped_ids
+        print(f"[HR Retrieve] active_cv_ids set to top-{requested_n}: {deduped_ids}")
+    else:
+        new_ids = [
             chunk.get("payload", {}).get("cvId")
             for chunk in cv_results
             if chunk.get("payload", {}).get("cvId") is not None
-        })
-        state["active_cv_ids"] = new_active_ids
-        print(f"[HR Retrieve] Updated active_cv_ids={new_active_ids}")
+        ]
+        # Merge: old (shown before) + new (just found), deduped, order preserved
+        merged = list(dict.fromkeys(active_cv_ids + new_ids))
+        state["active_cv_ids"] = merged
+        print(f"[HR Retrieve] FIND_MORE merged active_cv_ids={merged}")
 
     return state

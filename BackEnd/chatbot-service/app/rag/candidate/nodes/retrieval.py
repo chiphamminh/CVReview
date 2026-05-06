@@ -16,6 +16,8 @@ Strategy routing:
                    Mode B (Turn 2+, cache exists):   reranked section chunks reused
 """
 
+import asyncio
+import traceback
 from typing import List, Optional
 
 from app.rag.candidate.state import CandidateChatState
@@ -25,19 +27,42 @@ from app.services.recruitment_api import recruitment_api
 
 async def retrieve_context_node(state: CandidateChatState) -> CandidateChatState:
     """Dispatch to the correct retrieval sub-strategy based on pipeline_strategy."""
-    strategy = state.get("pipeline_strategy", "JD_SEARCH")
+    try:
+        strategy = state.get("pipeline_strategy", "JD_SEARCH")
 
-    if strategy in ("STATUS_CHECK", "APPLY"):
-        return _bypass_retrieval(state, strategy)
+        # No retrieval needed
+        if strategy in ("STATUS_CHECK", "APPLY"):
+            return _bypass_retrieval(state, strategy)
 
-    if strategy == "CV_ANALYSIS":
-        return await _retrieve_cv_only(state)
+        # CV-only retrieval
+        if strategy == "CV_ANALYSIS":
+            return await _retrieve_cv_only(state)
 
-    if strategy in ("JD_CONVERSE", "JD_ANALYSIS"):
-        return await _retrieve_jd_only(state)
+        # JD-only retrieval
+        if strategy in ("JD_CONVERSE", "JD_ANALYSIS"):
+            return await _retrieve_jd_only(state)
 
-    # Default: JD_SEARCH — CV + JD hybrid with Two-Stage Mode A/B
-    return await _retrieve_jd_search(state)
+        # Default: JD_SEARCH — CV + JD hybrid with Two-Stage Mode A/B
+        return await _retrieve_jd_search(state)
+
+    except asyncio.TimeoutError:
+        print("[Candidate Retrieve] Qdrant timeout — returning empty context")
+
+        state["cv_context"] = []
+        state["jd_context"] = []
+        state["retrieval_stats"] = {"error": "retrieval_timeout"}
+
+        return state
+
+    except Exception as e:
+        print(f"[Candidate Retrieve] Error: {e}")
+        traceback.print_exc()
+
+        state["cv_context"] = []
+        state["jd_context"] = []
+        state["retrieval_stats"] = {"error": str(e)}
+
+        return state
 
 
 # ---------------------------------------------------------------------------

@@ -9,7 +9,7 @@ Both outputs serve different roles:
   - expanded_query  → embedded into vector for DENSE search
   - skill_variants  → used as Qdrant MatchAny filter for KEYWORD search
 
-Fallback behaviour (timeout > 2s or any error):
+Fallback behaviour (timeout > 4s or any error):
   - expanded_query = original query
   - skill_variants = skill_keywords already extracted by the router
   - Warning is logged; pipeline continues normally
@@ -35,7 +35,7 @@ settings = get_settings()
 # LLM setup — use the cheapest/fastest model for expansion
 # ---------------------------------------------------------------------------
 
-_EXPANSION_TIMEOUT_SECONDS = 2.0
+_EXPANSION_TIMEOUT_SECONDS = float(getattr(settings, "EXPANSION_TIMEOUT_SECONDS", 4.0))
 
 _EXPANSION_PROMPT_TEMPLATE = """\
 You are a technical recruitment assistant.

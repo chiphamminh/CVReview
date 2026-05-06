@@ -12,6 +12,12 @@ async def load_candidate_scope_node(state: HRChatState) -> HRChatState:
         target_source = "HR" if state["mode"] == "HR_MODE" else "CANDIDATE"
         filtered_apps = [app for app in applications if app.get("sourceType") == target_source]
 
+        # Position name from SQL
+        if filtered_apps:
+            state["position_name"] = filtered_apps[0].get("positionName", f"Position #{state['position_id']}")
+        else:
+            state["position_name"] = f"Position #{state['position_id']}"
+
         # Fast cvId → metadata lookup
         state["cv_id_to_meta"] = {}
         for app in filtered_apps:

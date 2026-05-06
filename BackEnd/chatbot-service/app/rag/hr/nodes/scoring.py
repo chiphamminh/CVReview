@@ -54,9 +54,9 @@ Evaluate this candidate and respond with ONLY a JSON object (no markdown) in thi
   "overallStatus": "<EXCELLENT_MATCH|GOOD_MATCH|POTENTIAL|POOR_FIT>",
   "feedback": "<2-3 sentence summary>",
   "skillMatch": "<comma-separated matched skills>",
-  "skillMiss": "<comma-separated missing skills or 'None'>",
-  "learningPath": "<recommended path if POTENTIAL/POOR_FIT, else null>"
-}}"""
+  "skillMiss": "<comma-separated missing skills or 'None'>"
+}}
+NOTE: Do NOT include learningPath. This is an HR tool for recruiter decisions, not candidate coaching."""
 
         print("HR scoring_prompt: ", scoring_prompt)
 
@@ -80,7 +80,7 @@ Evaluate this candidate and respond with ONLY a JSON object (no markdown) in thi
                         feedback=score_data.get("feedback", ""),
                         skill_match=score_data.get("skillMatch", ""),
                         skill_miss=score_data.get("skillMiss", ""),
-                        learning_path=score_data.get("learningPath"),
+                        learning_path=None,
                         session_id=state["session_id"],
                     )
                     saved_count += 1
@@ -94,23 +94,38 @@ Evaluate this candidate and respond with ONLY a JSON object (no markdown) in thi
                 "POOR_FIT": "❌",
             }.get(score_data.get("overallStatus", ""), "•")
 
+            tech_score = score_data.get('technicalScore', 0)
+            exp_score = score_data.get('experienceScore', 0)
+            match_percent = (tech_score + exp_score) // 2
+
+            link = ""
+            if app_cv_id:
+                link = f"[Xem chi tiết CV](/hr/positions/{state['position_id']}/applications/{app_cv_id})"
+
+            # Clean feedback to ensure it fits in one line in the markdown table
+            feedback = str(score_data.get('feedback', '')).replace('\n', ' ').strip()
+            
             scoring_results.append(
-                f"**{name}** {status_icon}\n"
-                f"• Kỹ thuật: {score_data.get('technicalScore')}/100 | "
-                f"Kinh nghiệm: {score_data.get('experienceScore')}/100\n"
-                f"• Nhận xét: {score_data.get('feedback')}\n"
-                f"• Phù hợp: {score_data.get('skillMatch')}\n"
-                f"• Còn thiếu: {score_data.get('skillMiss')}"
+                f"| **{name}** | {match_percent}% {status_icon} | {feedback} | {link} |"
             )
         except Exception as e:
-            scoring_results.append(f"**{name}**: Lỗi khi chấm điểm — {str(e)}")
+            scoring_results.append(f"| **{name}** | Lỗi | Lỗi khi chấm điểm — {str(e)} | |")
             print(f"[Scoring] Error scoring {name}: {e}")
 
     summary_header = (
-        f"📊 **Kết quả chấm điểm {len(scoring_results)} ứng viên** "
-        f"(đã lưu {saved_count}/{len(scoring_results)} vào hệ thống):\n"
+        f"\n\n📊 **Kết quả đánh giá {len(scoring_results)} ứng viên** "
+        f"(đã lưu {saved_count}/{len(scoring_results)} vào hệ thống):\n\n"
+        f"| Tên ứng viên | Độ phù hợp | Điểm nổi bật | Hành động |\n"
+        f"|---|---|---|---|\n"
     )
-    state["llm_response"] = summary_header + "\n\n".join(scoring_results)
+    
+    existing_response = state.get("llm_response", "").strip()
+    new_table = summary_header + "\n".join(scoring_results)
+    
+    if existing_response and "📊" not in existing_response:
+        state["llm_response"] = existing_response + new_table
+    else:
+        state["llm_response"] = new_table.strip()
     state["pending_scoring_candidates"] = None
     state["function_calls"] = [{"name": "hr_scoring", "candidates_scored": len(scoring_results), "saved": saved_count}]
     return state

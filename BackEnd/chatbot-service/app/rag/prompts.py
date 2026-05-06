@@ -417,9 +417,9 @@ def build_scored_jobs_context(scored_jobs: list) -> str:
 
 import re as _re
 
-_BENEFITS_RE  = _re.compile(r"\b(salary|compensation|wage|pay|stipend|benefit|insurance|bonus|perk|allowance)\b", _re.I)
-_PROCESS_RE   = _re.compile(r"\b(interview|process|round|stage|step|test|coding challenge|timeline|how long|response time)\b", _re.I)
-_IMPROVE_RE   = _re.compile(r"\b(improve|learn|study|roadmap|plan|prepare|how to get|what to add|skill gap|missing)\b", _re.I)
+_BENEFITS_RE  = _re.compile(r"\b(salary|compensation|wage|pay|stipend|benefit|insurance|bonus|perk|allowance|lương|luong|thưởng|thuong|phúc lợi|phuc loi|chế độ|che do|bảo hiểm|bao hiem|remote|hybrid)\b", _re.I)
+_PROCESS_RE   = _re.compile(r"\b(interview|process|round|stage|step|test|coding challenge|timeline|how long|response time|phỏng vấn|phong van|quy trình|quy trinh|vòng|thi|bài test|bao lâu|khi nào)\b", _re.I)
+_IMPROVE_RE   = _re.compile(r"\b(improve|learn|study|roadmap|plan|prepare|how to get|what to add|skill gap|missing|cải thiện|cai thien|học|hoc|chuẩn bị|chuan bi|lộ trình|lo trinh|thiếu)\b", _re.I)
 
 
 def _detect_jd_sub_intent(query: str) -> str:

@@ -53,6 +53,9 @@ class Settings(BaseSettings):
 
     # Reranker — multilingual model to support both Vietnamese and English queries
     RERANKER_MODEL_NAME: str = "BAAI/bge-reranker-v2-m3"
+
+    # LLM Expansion timeout
+    EXPANSION_TIMEOUT_SECONDS: float = 4.0
     
     class Config:
         env_file = ".env"
