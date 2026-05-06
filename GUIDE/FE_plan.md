@@ -16,6 +16,7 @@ opens inline edit or mini popover/modal to update score only
 -   Vite
 -   React Router DOM
 -   TanStack Query
+-   Zustand (Quản lý state cho Chatbot và Global)
 -   Axios
 -   Ant Design
 -   dayjs
@@ -101,7 +102,7 @@ Extra actions: - View CV - View analysis details
 ## 4.3 HR Chatbot Page
 
 Features: - Chat history sidebar - New chat - Mode select: - Internal -
-External - Chat streaming UI - Markdown render
+External - Chat streaming UI - Markdown render - Trả về link ứng viên (Navigate sang Candidate Page để thao tác nhanh)
 
 ------------------------------------------------------------------------
 
@@ -115,9 +116,12 @@ chatbot
 CV Card: - name - email - upload date - stage - status - applied
 positions
 
-Actions: - Update CV - Delete CV - View CV
+Actions: - Update CV (Kèm Warning Popup: Xóa đơn ứng tuyển cũ) - Delete CV - View CV
 
 Position card: - title - posted date - view JD - apply - chatbot icon
+
+Guardrail Nộp đơn:
+- Hiển thị UI trực quan (LearningPathCard) khi điểm < 70 và chatbot từ chối.
 
 ------------------------------------------------------------------------
 
@@ -169,7 +173,7 @@ component
 Widgets: - total positions - active positions - total candidates -
 accepted - rejected
 
-Charts: - candidates by stage - top positions by applicants
+Charts: - candidates by stage - top positions by applicants - Candidate pool analysis (Biểu đồ phân bổ Skill và Score range)
 
 ------------------------------------------------------------------------
 
