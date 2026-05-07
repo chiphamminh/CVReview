@@ -11,12 +11,12 @@ const STAGE_COLORS = {
 };
 
 const STAGE_LABELS = {
-  'APPLIED': 'Đã nộp đơn',
-  'INTERVIEW_SCHEDULED': 'Đã lên lịch phỏng vấn',
-  'INTERVIEWED': 'Đã phỏng vấn',
-  'OFFER': 'Đã gửi Offer',
-  'ACCEPTED': 'Chấp nhận Offer',
-  'REJECTED': 'Từ chối',
+  'APPLIED': 'Applied',
+  'INTERVIEW_SCHEDULED': 'Interview Scheduled',
+  'INTERVIEWED': 'Interviewed',
+  'OFFER': 'Offer',
+  'ACCEPTED': 'Accepted',
+  'REJECTED': 'Rejected',
 };
 
 const StageTag = ({ stage }) => {

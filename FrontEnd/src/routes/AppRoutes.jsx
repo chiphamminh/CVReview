@@ -1,18 +1,22 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import useAuthStore from '@/store/authStore';
 
-// Layouts (Placeholders)
-const HRLayout = ({ children }) => <div><h2>HR Layout</h2>{children}</div>;
-const CandidateLayout = ({ children }) => <div><h2>Candidate Layout</h2>{children}</div>;
+// Layouts & Protected Routes
+import HRLayout from '@/layouts/HRLayout';
+import ProtectedRoute from '@/components/common/ProtectedRoute';
 
-// Pages (Placeholders)
-const Login = () => <div>Login Page</div>;
+// Pages
+import Login from '@/pages/Login';
+import PositionsPage from '@/pages/hr/PositionsPage';
+import CandidatesPage from '@/pages/hr/CandidatesPage';
+import HRChatbotPage from '@/pages/hr/HRChatbotPage';
+
+// Placeholders
+const CandidateLayout = ({ children }) => <div><h2>Candidate Layout</h2>{children}</div>;
 const HRDashboard = () => <div>HR Dashboard</div>;
 const Careers = () => <div>Careers Page</div>;
 const CandidateCV = () => <div>Candidate CV Page</div>;
 const NotFound = () => <div>404 - Not Found</div>;
-
-import ProtectedRoute from '@/components/common/ProtectedRoute';
 
 const AppRoutes = () => {
   return (
@@ -31,7 +35,10 @@ const AppRoutes = () => {
               <HRLayout>
                 <Routes>
                   <Route path="dashboard" element={<HRDashboard />} />
-                  <Route path="*" element={<Navigate to="dashboard" replace />} />
+                  <Route path="positions" element={<PositionsPage />} />
+                  <Route path="candidates" element={<CandidatesPage />} />
+                  <Route path="chatbot/:positionId?" element={<HRChatbotPage />} />
+                  <Route path="*" element={<Navigate to="positions" replace />} />
                 </Routes>
               </HRLayout>
             </ProtectedRoute>
