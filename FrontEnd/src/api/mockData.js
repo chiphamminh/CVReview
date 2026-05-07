@@ -9,12 +9,22 @@ export const generateMockPositions = (count = 10) => {
   for (let i = 1; i <= count; i++) {
     const openedAt = randomDate(30);
     const isClosed = faker.datatype.boolean({ probability: 0.3 });
+    const score = faker.number.int({ min: 40, max: 95 });
+    
+    // Simulate cv analysis for candidate view
+    const hasAnalysis = faker.datatype.boolean({ probability: 0.7 });
+    let overallStatus = 'PENDING';
+    if (score >= 90) overallStatus = 'EXCELLENT_MATCH';
+    else if (score >= 70) overallStatus = 'GOOD_MATCH';
+    else if (score >= 60) overallStatus = 'POTENTIAL';
+    else overallStatus = 'POOR_FIT';
+
     positions.push({
       id: i,
       hrId: 'hr-admin',
-      name: faker.person.jobTitle(),
+      name: faker.person.jobTitle(), // e.g. "Intern Java Developer"
       language: faker.helpers.arrayElement(['Java', 'Python', 'React', 'NodeJS', 'C#', 'Go']),
-      level: faker.helpers.arrayElement(['Junior', 'Middle', 'Senior', 'Lead']),
+      level: faker.helpers.arrayElement(['Intern', 'Junior', 'Middle', 'Senior', 'Lead']),
       isActive: !isClosed,
       openedAt: openedAt.toISOString(),
       closedAt: isClosed ? dayjs(openedAt).add(faker.number.int({ min: 5, max: 20 }), 'day').toISOString() : null,
@@ -22,7 +32,14 @@ export const generateMockPositions = (count = 10) => {
       internalCount: faker.number.int({ min: 0, max: 50 }),
       externalCount: faker.number.int({ min: 0, max: 100 }),
       jobDescription: faker.lorem.paragraphs(2),
-      status: 'PROCESSED'
+      status: 'PROCESSED',
+      // For candidate view:
+      cvAnalysis: hasAnalysis ? {
+        score: score,
+        overallStatus: overallStatus,
+        isApplied: faker.datatype.boolean({ probability: 0.3 }),
+        learningPath: score < 70 ? faker.lorem.paragraphs(1) : null
+      } : null
     });
   }
   return positions;

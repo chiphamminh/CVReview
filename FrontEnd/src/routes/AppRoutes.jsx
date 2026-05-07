@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import useAuthStore from '@/store/authStore';
 
 // Layouts & Protected Routes
@@ -11,12 +11,12 @@ import PositionsPage from '@/pages/hr/PositionsPage';
 import CandidatesPage from '@/pages/hr/CandidatesPage';
 import HRChatbotPage from '@/pages/hr/HRChatbotPage';
 
-// Placeholders
-const CandidateLayout = ({ children }) => <div><h2>Candidate Layout</h2>{children}</div>;
-const HRDashboard = () => <div>HR Dashboard</div>;
-const Careers = () => <div>Careers Page</div>;
-const CandidateCV = () => <div>Candidate CV Page</div>;
+import CandidateLayout from '@/layouts/CandidateLayout';
+import CareerPage from '@/pages/candidate/CareerPage';
+import CVPage from '@/pages/candidate/CVPage';
+
 const NotFound = () => <div>404 - Not Found</div>;
+const HRDashboard = () => <div>HR Dashboard</div>;
 
 const AppRoutes = () => {
   return (
@@ -24,8 +24,17 @@ const AppRoutes = () => {
       <Routes>
         {/* Public Routes */}
         <Route path="/login" element={<Login />} />
-        <Route path="/careers" element={<Careers />} />
-        <Route path="/" element={<Navigate to="/careers" replace />} />
+        
+        {/* Candidate Layout (includes Public Careers and Protected Routes) */}
+        <Route path="/" element={<CandidateLayout><Outlet /></CandidateLayout>}>
+          <Route index element={<Navigate to="/careers" replace />} />
+          <Route path="careers" element={<CareerPage />} />
+          
+          <Route path="candidate" element={<ProtectedRoute allowedRoles={['CANDIDATE']}><Outlet /></ProtectedRoute>}>
+            <Route path="cv" element={<CVPage />} />
+            <Route path="*" element={<Navigate to="cv" replace />} />
+          </Route>
+        </Route>
 
         {/* HR Routes */}
         <Route
@@ -41,21 +50,6 @@ const AppRoutes = () => {
                   <Route path="*" element={<Navigate to="positions" replace />} />
                 </Routes>
               </HRLayout>
-            </ProtectedRoute>
-          }
-        />
-
-        {/* Candidate Routes */}
-        <Route
-          path="/candidate/*"
-          element={
-            <ProtectedRoute allowedRoles={['CANDIDATE']}>
-              <CandidateLayout>
-                <Routes>
-                  <Route path="cv" element={<CandidateCV />} />
-                  <Route path="*" element={<Navigate to="cv" replace />} />
-                </Routes>
-              </CandidateLayout>
             </ProtectedRoute>
           }
         />

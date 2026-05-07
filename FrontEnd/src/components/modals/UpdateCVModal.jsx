@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { Modal, Form, Input, Button } from 'antd';
 
-const UpdateCVModal = ({ open, onCancel, onSave, initialData }) => {
+const UpdateCVModal = ({ open, onCancel, onSave, initialData, title }) => {
   const [form] = Form.useForm();
 
   useEffect(() => {
@@ -21,7 +21,7 @@ const UpdateCVModal = ({ open, onCancel, onSave, initialData }) => {
 
   return (
     <Modal
-      title="Update Candidate Info (Internal)"
+      title={title || "Update Candidate Info (Internal)"}
       open={open}
       onCancel={onCancel}
       footer={[
