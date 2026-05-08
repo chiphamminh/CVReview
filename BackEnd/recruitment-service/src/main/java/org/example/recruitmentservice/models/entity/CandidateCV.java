@@ -52,9 +52,6 @@ public class CandidateCV {
     private String name;
 
     @Column
-    private String cvPath;
-
-    @Column
     private String driveFileId;
 
     @Column
@@ -76,13 +73,16 @@ public class CandidateCV {
     private RecruitmentStage recruitmentStage = RecruitmentStage.APPLIED;
 
     @Column
-    private LocalDateTime parsedAt;
+    private LocalDateTime createdAt;
 
     @Column
     private String batchId;
 
     @Column
-    private LocalDateTime scoredAt;
+    private LocalDateTime appliedDate;
+
+    @Column
+    private LocalDateTime interviewSchedule;
 
     @Column
     private LocalDateTime failedAt;

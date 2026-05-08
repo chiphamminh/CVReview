@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.recruitmentservice.dto.request.JDChunkPayload;
 import org.example.recruitmentservice.services.chunking.config.ChunkingConfig;
 import org.example.recruitmentservice.utils.TextUtils;
+import org.example.recruitmentservice.utils.PositionUtils;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -15,13 +16,15 @@ import java.util.regex.Pattern;
 
 /**
  * Dedicated chunking service for Job Description Markdown text.
- * Kept separate from CV ChunkingService (SRP) — JDs require no metadata extraction
- * (Gemini, skills, experience years, etc.) and follow a different section schema.
+ * Kept separate from CV ChunkingService (SRP) — JDs require no metadata
+ * extraction
+ * (Gemini, skills, experience years, etc.) and follow a different section
+ * schema.
  *
  * Strategy:
- *   1. Split text on Markdown H1/H2 headers (# / ##) into named sections.
- *   2. If a section still exceeds maxTokens, split further by paragraphs.
- *   3. Each chunk carries positionId for Small-to-Big parent lookup in Qdrant.
+ * 1. Split text on Markdown H1/H2 headers (# / ##) into named sections.
+ * 2. If a section still exceeds maxTokens, split further by paragraphs.
+ * 3. Each chunk carries positionId for Small-to-Big parent lookup in Qdrant.
  */
 @Slf4j
 @Service
@@ -33,31 +36,25 @@ public class JDChunkingService {
 
     private static final Pattern HEADER_PATTERN = Pattern.compile(
             "(?:^|\\n)\\s*(#{1,2})\\s+([^#\\n\\r]+?)(?=\\s*\\n|$)",
-            Pattern.MULTILINE
-    );
+            Pattern.MULTILINE);
 
     /**
      * Chunks a JD Markdown text into section-based {@link JDChunkPayload} list.
      *
-     * @param positionId   the owning position's DB id
-     * @param positionName position name (e.g. "Backend Engineer")
-     * @param language     position language requirement
-     * @param level        position seniority level
-     * @param jdMarkdown   the Markdown text returned by LlamaParse
+     * @param positionId    the owning position's DB id
+     * @param positionTitle position title (e.g. \"Senior Fullstack Engineer\")
+     * @param seniority     position seniority level
+     * @param jdMarkdown    the Markdown text returned by LlamaParse
      * @return list of chunks; never null, may be empty if input is blank
      */
-    public List<JDChunkPayload> chunk(Integer positionId, String positionName,
-                                      String language, String level, String jdMarkdown) {
+    public List<JDChunkPayload> chunk(Integer positionId, String positionTitle,
+            String seniority, String jdMarkdown) {
         if (jdMarkdown == null || jdMarkdown.isBlank()) {
             log.warn("[JDChunking] Empty JD text for position {}", positionId);
             return Collections.emptyList();
         }
 
-        // Phase 4: Concatenate level, language, and name for better context in Qdrant/LLM
-        String formattedName = (level != null ? level + " " : "") 
-                             + (language != null ? language + " " : "") 
-                             + (positionName != null ? positionName : "");
-        formattedName = formattedName.trim();
+        String formattedTitle = PositionUtils.formatPositionTitle(seniority, positionTitle);
 
         try {
             String normalized = normalize(jdMarkdown);
@@ -65,7 +62,7 @@ public class JDChunkingService {
 
             if (sections.isEmpty()) {
                 log.info("[JDChunking] No headers found for position {}, treating as single chunk", positionId);
-                return List.of(buildPayload(positionId, formattedName, language, level, "FULL_TEXT", 0, normalized));
+                return List.of(buildPayload(positionId, formattedTitle, seniority, "FULL_TEXT", 0, normalized));
             }
 
             List<JDChunkPayload> result = new ArrayList<>();
@@ -76,16 +73,13 @@ public class JDChunkingService {
 
                 if (tokens <= config.getMaxTokens()) {
                     result.add(buildPayload(
-                            positionId, formattedName, language, level,
-                            section.name, globalIndex++, section.text
-                    ));
+                            positionId, formattedTitle, seniority,
+                            section.name, globalIndex++, section.text));
                 } else {
-                    // Section is too large — split by paragraphs to respect token budget
                     log.debug("[JDChunking] Section '{}' exceeds maxTokens ({} tokens), splitting by paragraph",
                             section.name, tokens);
                     List<JDChunkPayload> sub = splitByParagraph(
-                            positionId, formattedName, language, level, section.name, section.text, globalIndex
-                    );
+                            positionId, formattedTitle, seniority, section.name, section.text, globalIndex);
                     result.addAll(sub);
                     globalIndex += sub.size();
                 }
@@ -107,13 +101,14 @@ public class JDChunkingService {
     /** Extracts named sections by splitting on H1/H2 Markdown headers. */
     private List<RawSection> extractSections(String text) {
         Matcher matcher = HEADER_PATTERN.matcher(text);
-        List<int[]> boundaries = new ArrayList<>();   // [headerStart, contentStart]
+        List<int[]> boundaries = new ArrayList<>(); // [headerStart, contentStart]
         List<String> names = new ArrayList<>();
 
         while (matcher.find()) {
             String headerName = matcher.group(2).trim();
-            if (headerName.length() > 120) continue; // skip suspiciously long headers
-            boundaries.add(new int[]{matcher.start(), matcher.end()});
+            if (headerName.length() > 120)
+                continue; // skip suspiciously long headers
+            boundaries.add(new int[] { matcher.start(), matcher.end() });
             names.add(normalizeHeaderName(headerName));
         }
 
@@ -138,18 +133,18 @@ public class JDChunkingService {
 
     /**
      * Splits an oversized section by double-newline paragraphs.
-     * Falls back to keeping the entire section as one chunk if it cannot be split further.
+     * Falls back to keeping the entire section as one chunk if it cannot be split
+     * further.
      */
-    private List<JDChunkPayload> splitByParagraph(Integer positionId, String positionName,
-                                                   String language, String level,
-                                                   String sectionName, String sectionText, int startIndex) {
+    private List<JDChunkPayload> splitByParagraph(Integer positionId, String positionTitle,
+            String seniority,
+            String sectionName, String sectionText, int startIndex) {
         List<JDChunkPayload> chunks = new ArrayList<>();
         String[] paragraphs = sectionText.split("\\n\\n+");
 
         if (paragraphs.length <= 1) {
-            // Cannot split — keep as single chunk with a warning
             log.warn("[JDChunking] Section '{}' cannot be split further, keeping as oversized chunk", sectionName);
-            chunks.add(buildPayload(positionId, positionName, language, level, sectionName, startIndex, sectionText));
+            chunks.add(buildPayload(positionId, positionTitle, seniority, sectionName, startIndex, sectionText));
             return chunks;
         }
 
@@ -159,22 +154,23 @@ public class JDChunkingService {
 
         for (String paragraph : paragraphs) {
             paragraph = paragraph.trim();
-            if (paragraph.isBlank()) continue;
+            if (paragraph.isBlank())
+                continue;
 
             int paraWords = textUtils.countWords(paragraph);
             int bufferTokens = textUtils.estimateTokensFromWords(bufferWords);
             int paraTokens = textUtils.estimateTokensFromWords(paraWords);
 
             if (bufferTokens + paraTokens <= config.getMaxTokens()) {
-                if (!buffer.isEmpty()) buffer.append("\n\n");
+                if (!buffer.isEmpty())
+                    buffer.append("\n\n");
                 buffer.append(paragraph);
                 bufferWords += paraWords;
             } else {
                 if (!buffer.isEmpty()) {
                     chunks.add(buildPayload(
-                            positionId, positionName, language, level,
-                            sectionName, chunkIdx++, buffer.toString()
-                    ));
+                            positionId, positionTitle, seniority,
+                            sectionName, chunkIdx++, buffer.toString()));
                 }
                 buffer = new StringBuilder(paragraph);
                 bufferWords = paraWords;
@@ -183,24 +179,22 @@ public class JDChunkingService {
 
         if (!buffer.isEmpty()) {
             chunks.add(buildPayload(
-                    positionId, positionName, language, level,
-                    sectionName, chunkIdx, buffer.toString()
-            ));
+                    positionId, positionTitle, seniority,
+                    sectionName, chunkIdx, buffer.toString()));
         }
 
         return chunks;
     }
 
-    private JDChunkPayload buildPayload(Integer positionId, String positionName,
-                                        String language, String level,
-                                        String sectionName, int chunkIndex, String text) {
+    private JDChunkPayload buildPayload(Integer positionId, String positionTitle,
+            String seniority,
+            String sectionName, int chunkIndex, String text) {
         int words = textUtils.countWords(text);
         int tokens = textUtils.estimateTokensFromWords(words);
         return JDChunkPayload.builder()
                 .positionId(positionId)
-                .positionName(positionName)
-                .language(language)
-                .level(level)
+                .positionTitle(positionTitle)
+                .seniority(seniority)
                 .sectionName(sectionName)
                 .chunkIndex(chunkIndex)
                 .chunkText(text)
@@ -209,14 +203,20 @@ public class JDChunkingService {
                 .build();
     }
 
-    /** Normalises a raw Markdown header string to a consistent uppercase key (e.g. "Job Requirements" → "JOB_REQUIREMENTS"). */
+    /**
+     * Normalises a raw Markdown header string to a consistent uppercase key (e.g.
+     * "Job Requirements" → "JOB_REQUIREMENTS").
+     */
     private String normalizeHeaderName(String raw) {
         return raw.toUpperCase()
                 .replaceAll("[^A-Z0-9]+", "_")
                 .replaceAll("^_|_$", "");
     }
 
-    /** Light normalization for JD text — strips carriage returns and collapses excessive blank lines. */
+    /**
+     * Light normalization for JD text — strips carriage returns and collapses
+     * excessive blank lines.
+     */
     private String normalize(String text) {
         return text
                 .replaceAll("\\r\\n", "\n")
@@ -226,5 +226,6 @@ public class JDChunkingService {
     }
 
     /** Internal value-holder for extracted sections before building payloads. */
-    private record RawSection(String name, String text) {}
+    private record RawSection(String name, String text) {
+    }
 }

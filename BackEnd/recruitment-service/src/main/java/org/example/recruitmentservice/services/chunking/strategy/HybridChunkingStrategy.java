@@ -309,7 +309,7 @@ public class HybridChunkingStrategy implements ChunkingStrategy {
                 .candidateId(cv.getCandidateId())
                 .hrId(cv.getHrId())
                 .positionId(cv.getPosition() != null ? cv.getPosition().getId() : null)
-                .position(cv.getPosition() != null ? cv.getPosition().getName() : null)
+                .position(cv.getPosition() != null ? cv.getPosition().getTitle() : null)
                 .section(section)
                 .chunkIndex(chunkIdx)
                 .chunkText(enrichedText)

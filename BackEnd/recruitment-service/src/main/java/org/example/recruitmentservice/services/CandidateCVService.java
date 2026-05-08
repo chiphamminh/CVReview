@@ -1,8 +1,8 @@
 package org.example.recruitmentservice.services;
 
-import org.example.recruitmentservice.dto.response.DriveFileInfo;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestTemplate;
+import com.google.api.client.util.Value;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.commonlibrary.dto.response.ApiResponse;
@@ -10,8 +10,6 @@ import org.example.commonlibrary.dto.response.ErrorCode;
 import org.example.commonlibrary.dto.response.PageResponse;
 import org.example.commonlibrary.exception.CustomException;
 import org.example.commonlibrary.utils.PageUtil;
-import org.example.recruitmentservice.config.RabbitMQConfig;
-import org.example.recruitmentservice.dto.request.CVUploadEvent;
 import org.example.recruitmentservice.dto.response.CandidateCVResponse;
 import org.example.recruitmentservice.models.entity.CVAnalysis;
 import org.example.recruitmentservice.models.enums.CVStatus;
@@ -20,15 +18,10 @@ import org.example.recruitmentservice.models.entity.Positions;
 import org.example.recruitmentservice.repository.CVAnalysisRepository;
 import org.example.recruitmentservice.repository.CandidateCVRepository;
 import org.example.recruitmentservice.repository.PositionRepository;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.web.multipart.MultipartFile;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
 
@@ -40,7 +33,6 @@ public class CandidateCVService {
     private final PositionRepository positionRepository;
     private final CVAnalysisRepository cvAnalysisRepository;
     private final StorageService storageService;
-    private final RabbitTemplate rabbitTemplate;
     private final RestTemplate restTemplate;
 
     @Value("${EMBEDDING_SERVICE_URL}")
@@ -56,26 +48,25 @@ public class CandidateCVService {
         CandidateCVResponse response = CandidateCVResponse.builder()
                 .cvId(cv.getId())
                 .positionId(cv.getPosition().getId())
-                .positionName(cv.getPosition().getName() + " " + cv.getPosition().getLanguage() + " "
-                        + cv.getPosition().getLevel())
+                .positionTitle(cv.getPosition().getTitle())
                 .name(cv.getName())
                 .email(cv.getEmail())
                 .batchId(cv.getBatchId())
-                .filePath(cv.getCvPath())
                 .driveFileUrl(cv.getDriveFileUrl())
                 .technicalScore(cvAnalysis != null ? cvAnalysis.getTechnicalScore() : null)
                 .experienceScore(cvAnalysis != null ? cvAnalysis.getExperienceScore() : null)
                 .overallStatus(cvAnalysis != null ? cvAnalysis.getOverallStatus() : null)
-                .feedback(cvAnalysis != null ? cvAnalysis.getFeedback() : null)
-                .skillMatch(cvAnalysis != null ? cvAnalysis.getSkillMatch() : null)
-                .skillMiss(cvAnalysis != null ? cvAnalysis.getSkillMiss() : null)
+                .aiAssessment(cvAnalysis != null ? cvAnalysis.getAiAssessment() : null)
                 .learningPath(cvAnalysis != null ? cvAnalysis.getLearningPath() : null)
                 .status(cv.getCvStatus())
                 .errorMessage(cv.getErrorMessage())
                 .failedAt(cv.getFailedAt())
                 .retryCount(cv.getRetryCount())
                 .canRetry(cv.getCvStatus() == CVStatus.FAILED)
-                .analyzedAt(cvAnalysis != null ? cvAnalysis.getAnalyzedAt() : null)
+                .createdAt(cv.getCreatedAt())
+                .recruitmentStage(cv.getRecruitmentStage())
+                .appliedDate(cv.getAppliedDate())
+                .interviewSchedule(cv.getInterviewSchedule())
                 .build();
 
         return new ApiResponse<>(
@@ -99,104 +90,39 @@ public class CandidateCVService {
         Page<CandidateCVResponse> mappedPage = cvPage.map(cv -> CandidateCVResponse.builder()
                 .cvId(cv.getId())
                 .positionId(cv.getPosition().getId())
-                .positionName(cv.getPosition().getName() + " " + cv.getPosition().getLanguage() + " "
-                        + cv.getPosition().getLevel())
+                .positionTitle(cv.getPosition().getTitle())
                 .batchId(cv.getBatchId())
                 .status(cv.getCvStatus())
                 .name(cv.getName())
                 .email(cv.getEmail())
                 .updatedAt(cv.getUpdatedAt())
-                .filePath(cv.getCvPath())
                 .driveFileUrl(cv.getDriveFileUrl())
                 .build());
 
         return ApiResponse.<PageResponse<CandidateCVResponse>>builder()
                 .statusCode(ErrorCode.SUCCESS.getCode())
-                .message("Fetched all CVs for position: " + position.getName() + " " + position.getLanguage() + " "
-                        + position.getLevel())
+                .message("Fetched all CVs for position: " + position.getTitle())
                 .data(PageUtil.toPageResponse(mappedPage))
                 .timestamp(LocalDateTime.now())
                 .build();
     }
 
+    /**
+     * Update thông tin cơ bản của CV (name, email).
+     * Không cho phép thay đổi file — CV đã nộp là một snapshot cố định.
+     */
     @Transactional
-    public void updateCV(int cvId, MultipartFile newFile, String name, String email) {
+    public void updateCV(int cvId, String name, String email) {
         CandidateCV cv = candidateCVRepository.findById(cvId)
                 .orElseThrow(() -> new CustomException(ErrorCode.CV_NOT_FOUND));
 
-        // If just update name and mail
-        if (newFile == null || newFile.isEmpty()) {
-            if (name != null && !name.trim().isEmpty()) {
-                cv.setName(name.trim());
-            }
-            if (email != null && !email.trim().isEmpty()) {
-                cv.setEmail(email.trim());
-            }
-
-            cv.setUpdatedAt(LocalDateTime.now());
-            candidateCVRepository.save(cv);
-            return;
+        if (name != null && !name.trim().isEmpty()) {
+            cv.setName(name.trim());
+        }
+        if (email != null && !email.trim().isEmpty()) {
+            cv.setEmail(email.trim());
         }
 
-        // Upload new file
-        try {
-            try {
-                String url = embeddingServiceUrl + "/cv/" + cvId;
-                restTemplate.delete(url);
-                System.out.println("Deleted old embeddings for CV: " + cvId);
-            } catch (Exception e) {
-                System.err.println("Failed to delete old embeddings for CV " + cvId + ": " + e.getMessage());
-            }
-
-            String oldFileId = cv.getDriveFileId();
-            if (oldFileId != null && !oldFileId.isEmpty()) {
-                storageService.deleteFile(oldFileId); // deleteFile nhận fileId
-            }
-
-            Positions position = cv.getPosition();
-            String folderPath;
-            if (position != null && position.getDriveFileId() != null) {
-                folderPath = position.getName() + "/"
-                        + position.getLanguage() + "/"
-                        + position.getLevel() + "/CV";
-            } else {
-                folderPath = "candidate-cvs/" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM"));
-            }
-
-            DriveFileInfo driveFileInfo = storageService.uploadCV(newFile, folderPath);
-
-            cv.setDriveFileId(driveFileInfo.getFileId());
-            cv.setDriveFileUrl(driveFileInfo.getWebViewLink());
-
-            cv.setCvStatus(CVStatus.PENDING);
-            cv.setName(null);
-            cv.setEmail(null);
-            cv.setCvContent(null);
-            cv.setUpdatedAt(LocalDateTime.now());
-            candidateCVRepository.save(cv);
-
-            CVUploadEvent event = new CVUploadEvent(
-                    cv.getId(),
-                    driveFileInfo.getFileId(), // Gửi fileId
-                    position != null ? position.getId() : null,
-                    cv.getBatchId());
-            rabbitTemplate.convertAndSend(RabbitMQConfig.CV_UPLOAD_QUEUE, event);
-
-        } catch (CustomException e) {
-            System.err.println("CustomException while updating CV: " + e.getMessage());
-            throw e;
-        } catch (Exception e) {
-            System.err.println("Unexpected error while updating CV: " + e.getMessage());
-            e.printStackTrace();
-            throw new CustomException(ErrorCode.FAILED_SAVE_FILE);
-        }
-    }
-
-    @Transactional
-    public void updateCVStatus(int cvId, CVStatus status) {
-        CandidateCV cv = candidateCVRepository.findById(cvId)
-                .orElseThrow(() -> new CustomException(ErrorCode.CV_NOT_FOUND));
-        cv.setCvStatus(status);
         cv.setUpdatedAt(LocalDateTime.now());
         candidateCVRepository.save(cv);
     }
@@ -221,8 +147,8 @@ public class CandidateCVService {
 
             // Xóa file trên GG Drive
             try {
-                if (cv.getCvPath() != null) {
-                    storageService.deleteFile(cv.getCvPath());
+                if (cv.getDriveFileId() != null) {
+                    storageService.deleteFile(cv.getDriveFileId());
                 }
             } catch (Exception e) {
                 throw new CustomException(ErrorCode.FILE_DELETE_FAILED);

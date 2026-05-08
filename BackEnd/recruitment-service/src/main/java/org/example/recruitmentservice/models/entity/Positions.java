@@ -27,11 +27,18 @@ public class Positions {
     @Builder.Default
     private List<CandidateCV> candidateCVs = new ArrayList<>();
 
-    private String name;
+    private String title;
 
-    private String language;
+    @ElementCollection
+    @CollectionTable(name = "position_skills", joinColumns = @JoinColumn(name = "position_id"))
+    @Column(name = "skill")
+    @Builder.Default
+    private List<String> skills = new ArrayList<>();
 
-    private String level;
+    private String seniority;
+
+    @Column
+    private Double minimumFitScore;
 
     @Lob
     @Column(columnDefinition = "TEXT", nullable = false)

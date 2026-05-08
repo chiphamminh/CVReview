@@ -12,9 +12,7 @@ public class EvaluateApplicationRequest {
     private Integer technicalScore;
     private Integer experienceScore;
     private MatchStatus overallStatus;
-    private String feedback;
-    private String skillMatch;
-    private String skillMiss;
+    private String aiAssessment;
     private String learningPath;
     private String sessionId;
 }

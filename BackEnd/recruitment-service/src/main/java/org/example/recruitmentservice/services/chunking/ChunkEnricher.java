@@ -18,15 +18,14 @@ public class ChunkEnricher {
             CandidateCV cv,
             String section,
             String rawText,
-            CVMetadata metadata
-    ) {
+            CVMetadata metadata) {
         StringBuilder enriched = new StringBuilder();
 
         // Build context header
         enriched.append("CANDIDATE: ").append(cv.getName() != null ? cv.getName() : "Unknown").append("\n");
 
-        if (cv.getPosition() != null && cv.getPosition().getName() != null) {
-            enriched.append("POSITION: ").append(cv.getPosition().getName()).append("\n");
+        if (cv.getPosition() != null && cv.getPosition().getTitle() != null) {
+            enriched.append("POSITION: ").append(cv.getPosition().getTitle()).append("\n");
         }
 
         if (metadata.getExperienceYears() != null && metadata.getExperienceYears() > 0) {
@@ -52,14 +51,13 @@ public class ChunkEnricher {
     public String createExecutiveSummary(
             CandidateCV cv,
             String fullText,
-            CVMetadata metadata
-    ) {
+            CVMetadata metadata) {
         StringBuilder summary = new StringBuilder();
 
         summary.append("CANDIDATE: ").append(cv.getName() != null ? cv.getName() : "Unknown").append("\n");
 
-        if (cv.getPosition() != null && cv.getPosition().getName() != null) {
-            summary.append("POSITION: ").append(cv.getPosition().getName()).append("\n");
+        if (cv.getPosition() != null && cv.getPosition().getTitle() != null) {
+            summary.append("POSITION: ").append(cv.getPosition().getTitle()).append("\n");
         }
 
         if (metadata.getExperienceYears() != null) {

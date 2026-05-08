@@ -16,8 +16,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class PositionDetailsResponse {
     private Integer id;
-    private String name;
-    private String language;
-    private String level;
+    private String title;
+    private String seniority;
     private String jdText;
 }

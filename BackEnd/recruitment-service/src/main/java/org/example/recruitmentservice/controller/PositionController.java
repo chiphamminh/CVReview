@@ -32,17 +32,14 @@ public class PositionController {
     @PreAuthorize("hasRole('HR')")
     @GetMapping
     public ResponseEntity<ApiResponse<List<PositionsResponse>>> getPositions(
-            @RequestParam(required = false) String name,
-            @RequestParam(required = false) String language,
-            @RequestParam(required = false) String level
-    ) {
-        return ResponseEntity.ok(positionService.getPositions(name, language, level));
+            @RequestParam(required = false) String title,
+            @RequestParam(required = false) String seniority) {
+        return ResponseEntity.ok(positionService.getPositions(title, seniority));
     }
 
     @GetMapping("/jd/{positionId}/text")
     public ResponseEntity<ApiResponse<PositionsResponse>> getJdText(
-            @PathVariable int positionId
-    ) {
+            @PathVariable int positionId) {
         return ResponseEntity.ok(positionService.getJdText(positionId));
     }
 
@@ -50,8 +47,7 @@ public class PositionController {
     @GetMapping("/all")
     public ApiResponse<PageResponse<PositionsResponse>> getAllPositions(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size
-    ) {
+            @RequestParam(defaultValue = "10") int size) {
         return positionService.getAllPositions(page, size);
     }
 

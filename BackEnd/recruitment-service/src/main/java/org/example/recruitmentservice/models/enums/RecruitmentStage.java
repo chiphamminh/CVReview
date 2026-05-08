@@ -2,7 +2,9 @@ package org.example.recruitmentservice.models.enums;
 
 public enum RecruitmentStage {
     APPLIED,
-    INTERVIEW_INVITED,
-    OFFER_SENT,
-    REJECTED
+    INTERVIEW_SCHEDULED,
+    INTERVIEWED,
+    REJECTED,
+    OFFER,
+    ACCEPTED
 }

@@ -159,7 +159,6 @@ public class LlamaParseClient {
         if (email != null)
             cv.setEmail(email);
         cv.setCvStatus(CVStatus.EXTRACTED);
-        cv.setParsedAt(LocalDateTime.now());
         cv.setUpdatedAt(LocalDateTime.now());
         cv.setErrorMessage(null);
         cv.setFailedAt(null);
@@ -369,7 +368,6 @@ public class LlamaParseClient {
         log.error("LlamaParse polling timed out (75s) for jobId: {}", jobId);
         throw new RuntimeException("LlamaParse parse timeout after " + MAX_POLLS + " polls for job: " + jobId);
     }
-
 
     /**
      * Post-processing sanitizer applied to all LlamaParse output — the "last line

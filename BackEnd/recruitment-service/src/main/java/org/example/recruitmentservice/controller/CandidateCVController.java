@@ -10,7 +10,6 @@ import org.example.recruitmentservice.services.CandidateCVService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -32,34 +31,20 @@ public class CandidateCVController {
             @PathVariable int positionId,
             @RequestParam(required = false) List<CVStatus> statuses,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size
-    ) {
+            @RequestParam(defaultValue = "10") int size) {
         return candidateCVService.getAllCVsByPositionId(positionId, statuses, page, size);
     }
 
-    @PreAuthorize("hasAnyRole('HR', 'CANDIDATE')")
-    @PostMapping("/{cvId}")
+    @PreAuthorize("hasRole('CANDIDATE')")
+    @PutMapping("/{cvId}")
     public ResponseEntity<ApiResponse<Object>> updateCandidateCV(
             @PathVariable int cvId,
             @RequestParam(value = "name", required = false) String name,
-            @RequestParam(value = "email", required = false) String email,
-            @RequestParam(value = "file", required = false) MultipartFile file) {
-        candidateCVService.updateCV(cvId, file, name, email);
+            @RequestParam(value = "email", required = false) String email) {
+        candidateCVService.updateCV(cvId, name, email);
         return ResponseEntity.ok(new ApiResponse<>(
                 ErrorCode.SUCCESS.getCode(),
                 "Updated Candidate CV successfully"));
-    }
-
-    @PreAuthorize("hasRole('HR')")
-    @PostMapping("/{cvId}/{status}")
-    public ResponseEntity<ApiResponse<Object>> updateCVStatus(
-            @PathVariable int cvId,
-            @PathVariable CVStatus status
-            ) {
-        candidateCVService.updateCVStatus(cvId, status);
-        return ResponseEntity.ok(new ApiResponse<>(
-                ErrorCode.SUCCESS.getCode(),
-                "Updated Candidate CV status successfully"));
     }
 
     @PreAuthorize("hasAnyRole('HR', 'CANDIDATE')")

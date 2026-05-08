@@ -70,7 +70,7 @@ public class UploadCVService {
         List<CompletableFuture<Void>> futures = files.stream()
                 .map(file -> CompletableFuture.runAsync(() -> {
                     try {
-                        uploadSingleCV(file, position, batchId, SourceType.HR, userId);
+                        uploadSingleCV(file, position, batchId, SourceType.INTERNAL, userId);
                         successCounter.incrementAndGet();
                     } catch (Exception e) {
                         System.err.println("File failed: " + e.getMessage());
@@ -127,7 +127,7 @@ public class UploadCVService {
                 BatchType.CV_UPLOAD);
 
         try {
-            CandidateCV cv = uploadSingleCV(file, null, batchId, SourceType.CANDIDATE, candidateId);
+            CandidateCV cv = uploadSingleCV(file, null, batchId, SourceType.EXTERNAL, candidateId);
 
             Map<String, Object> response = new HashMap<>();
             response.put("cvId", cv.getId());
@@ -196,9 +196,9 @@ public class UploadCVService {
             cv.setUpdatedAt(LocalDateTime.now());
             cv.setBatchId(batchId);
             cv.setSourceType(sourceType);
-            if (sourceType == SourceType.HR) {
+            if (sourceType == SourceType.INTERNAL) {
                 cv.setHrId(userId);
-            } else if (sourceType == SourceType.CANDIDATE) {
+            } else if (sourceType == SourceType.EXTERNAL) {
                 cv.setCandidateId(userId);
             }
 
@@ -232,23 +232,12 @@ public class UploadCVService {
      */
     private String buildFolderPath(Positions position) {
         if (position != null && position.getDriveFileId() != null) {
-            // HR upload - lưu theo position structure
             StringBuilder path = new StringBuilder();
-
-            // Name (mandatory)
-            path.append(position.getName());
-
-            // Language (optional)
-            if (position.getLanguage() != null && !position.getLanguage().isBlank()) {
-                path.append("/").append(position.getLanguage().trim());
+            path.append(position.getTitle());
+            if (position.getSeniority() != null && !position.getSeniority().isBlank()) {
+                path.append("/").append(position.getSeniority().trim());
             }
-
-            // Level (mandatory)
-            path.append("/").append(position.getLevel());
-
-            // CV folder
             path.append("/CV");
-
             return path.toString();
         } else {
             // CANDIDATE upload - lưu vào thư mục chung

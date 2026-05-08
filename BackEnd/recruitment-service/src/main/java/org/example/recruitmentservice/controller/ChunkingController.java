@@ -11,6 +11,7 @@ import org.example.recruitmentservice.services.chunking.ChunkingService;
 import org.example.recruitmentservice.services.chunking.JDChunkingService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.example.recruitmentservice.utils.PositionUtils;
 
 import java.util.HashMap;
 import java.util.List;
@@ -43,15 +44,18 @@ public class ChunkingController {
         // 3. Chunk
         List<ChunkPayload> chunks = chunkingService.chunk(
                 cv,
-                cv.getCvContent()
-        );
+                cv.getCvContent());
 
         // 4. Build response
         Map<String, Object> response = new HashMap<>();
         response.put("cvId", cv.getId());
         response.put("candidateId", cv.getCandidateId());
         response.put("candidateName", cv.getName());
-        response.put("position", cv.getPosition() != null ? cv.getPosition().getName() : null);
+        response.put("position",
+                cv.getPosition() != null
+                        ? PositionUtils.formatPositionTitle(cv.getPosition().getSeniority(),
+                                cv.getPosition().getTitle())
+                        : null);
         response.put("totalChunks", chunks.size());
         response.put("totalWords", chunks.stream().mapToInt(ChunkPayload::getWords).sum());
         response.put("totalTokens", chunks.stream().mapToInt(ChunkPayload::getTokensEstimate).sum());
@@ -79,15 +83,13 @@ public class ChunkingController {
 
         List<JDChunkPayload> chunks = jdChunkingService.chunk(
                 position.getId(),
-                position.getName(),
-                position.getLanguage(),
-                position.getLevel(),
-                position.getJobDescription()
-        );
+                position.getTitle(),
+                position.getSeniority(),
+                position.getJobDescription());
 
         Map<String, Object> response = new HashMap<>();
         response.put("positionId", position.getId());
-        response.put("positionName", position.getName());
+        response.put("positionName", PositionUtils.formatPositionTitle(position.getSeniority(), position.getTitle()));
         response.put("totalChunks", chunks.size());
         response.put("totalWords", chunks.stream().mapToInt(JDChunkPayload::getWords).sum());
         response.put("totalTokens", chunks.stream().mapToInt(JDChunkPayload::getTokensEstimate).sum());

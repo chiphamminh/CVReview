@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Builder;
 import lombok.Getter;
 
+import java.util.List;
+
 /**
  * DTO trả về danh sách active positions cho chatbot-service.
  * chatbot-service dùng id list này để filter Qdrant JD collection.
@@ -14,8 +16,9 @@ import lombok.Getter;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ActivePositionResponse {
     private Integer id;
-    private String name;
-    private String language;
-    private String level;
+    private String title;
+    private String seniority;
+    private List<String> skills;
+    private Double minimumFitScore;
     private String openedAt;
 }

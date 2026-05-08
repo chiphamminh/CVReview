@@ -16,6 +16,7 @@ import org.example.recruitmentservice.repository.CandidateCVRepository;
 import org.example.recruitmentservice.repository.PositionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.example.recruitmentservice.utils.PositionUtils;
 
 import java.time.LocalDateTime;
 
@@ -121,7 +122,7 @@ public class FinalizeApplicationService {
         app.setCandidateId(master.getCandidateId());
         app.setPosition(position);
         app.setParentCvId(master.getId());
-        app.setSourceType(SourceType.CANDIDATE);
+        app.setSourceType(SourceType.EXTERNAL);
         app.setEmail(master.getEmail());
         app.setName(master.getName());
         // Kế thừa Drive file info từ Master — không upload lại
@@ -133,6 +134,7 @@ public class FinalizeApplicationService {
         // Master.
         app.setCvStatus(CVStatus.EMBEDDED);
         app.setUpdatedAt(now);
+        app.setCreatedAt(now);
         return app;
     }
 
@@ -141,15 +143,12 @@ public class FinalizeApplicationService {
         CVAnalysis analysis = new CVAnalysis();
         analysis.setCandidateCV(applicationCv);
         analysis.setPositionId(position.getId());
-        analysis.setPositionName(position.getName() + " " + position.getLanguage() + " " + position.getLevel());
+        analysis.setPositionName(PositionUtils.formatPositionTitle(position.getSeniority(), position.getTitle()));
         analysis.setTechnicalScore(request.getTechnicalScore());
         analysis.setExperienceScore(request.getExperienceScore());
         analysis.setOverallStatus(request.getOverallStatus());
-        analysis.setFeedback(request.getFeedback());
-        analysis.setSkillMatch(request.getSkillMatch());
-        analysis.setSkillMiss(request.getSkillMiss());
+        analysis.setAiAssessment(request.getAiAssessment());
         analysis.setLearningPath(request.getLearningPath());
-        analysis.setAnalyzedAt(now);
         analysis.setAnalysisMethod("CHATBOT");
         return analysis;
     }

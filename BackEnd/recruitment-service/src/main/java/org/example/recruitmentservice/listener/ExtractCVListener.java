@@ -17,6 +17,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.example.recruitmentservice.utils.PositionUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -63,20 +64,22 @@ public class ExtractCVListener {
             }
 
             int totalTokens = chunks.stream().mapToInt(ChunkPayload::getTokensEstimate).sum();
+            String formattedTitle = PositionUtils.formatPositionTitle(cv.getPosition().getTitle(),
+                    cv.getPosition().getSeniority());
 
             CVChunkedEvent chunkedEvent = new CVChunkedEvent(
                     cvId,
                     cv.getCandidateId(),
                     cv.getHrId(),
-                    cv.getPosition() != null ? cv.getPosition().getName() : null,
+                    formattedTitle,
                     chunks,
                     chunks.size(),
                     totalTokens,
-                    event.getBatchId()
-            );
+                    event.getBatchId());
 
             rabbitTemplate.convertAndSend(RabbitMQConfig.CV_EMBED_QUEUE, chunkedEvent);
-            log.info("[EXTRACT] Published CVChunkedEvent for cvId={} to cv.embed.queue with {} chunks", cvId, chunks.size());
+            log.info("[EXTRACT] Published CVChunkedEvent for cvId={} to cv.embed.queue with {} chunks", cvId,
+                    chunks.size());
 
         } catch (CustomException e) {
             throw e;

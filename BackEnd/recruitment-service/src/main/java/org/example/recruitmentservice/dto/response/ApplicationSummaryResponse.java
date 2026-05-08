@@ -18,9 +18,7 @@ public class ApplicationSummaryResponse {
     private String candidateEmail;
     private Integer appCvId;      // cvId trong Qdrant (HR) hoặc id của applied CV (CANDIDATE)
     private Integer masterCvId;   // cvId trong Qdrant (CANDIDATE) — cầu nối để map name
-    private String sourceType;    // "HR" | "CANDIDATE"
+    private String sourceType;    // "INTERNAL" | "EXTERNAL"
     private Integer score;
-    private String feedback;
-    private String skillMatch;
-    private String skillMiss;
+    private String aiAssessment;
 }

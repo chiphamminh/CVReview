@@ -2,9 +2,9 @@ package org.example.recruitmentservice.dto.response;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.*;
-import org.example.recruitmentservice.models.entity.Positions;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Getter
 @Setter
@@ -15,11 +15,10 @@ import java.time.LocalDateTime;
 public class PositionsResponse {
     private Integer id;
     private String hrId;
-    private String name;
-    private String language;
-    private String level;
-    private String positionName;
-    private String jdPath;
+    private String title;
+    private String seniority;
+    private List<String> skills;
+    private Double minimumFitScore;
     private String driveFileUrl;
     private String jdText;
     private Boolean isActive;
@@ -30,18 +29,4 @@ public class PositionsResponse {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
-    public PositionsResponse(Positions positions) {
-        this.id = positions.getId();
-        this.name = positions.getName();
-        this.language = positions.getLanguage();
-        this.level = positions.getLevel();
-        this.jdPath = positions.getJdPath();
-        this.driveFileUrl = positions.getDriveFileUrl();
-        this.createdAt = positions.getCreatedAt();
-        this.updatedAt = positions.getUpdatedAt();
-        this.isActive = positions.isActive();
-        this.openedAt = positions.getOpenedAt();
-        this.status = positions.getStatus();
-        this.batchId = positions.getBatchId();
-    }
 }

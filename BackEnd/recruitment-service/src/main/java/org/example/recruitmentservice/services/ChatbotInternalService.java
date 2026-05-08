@@ -12,6 +12,7 @@ import org.example.recruitmentservice.dto.request.EvaluateApplicationRequest;
 import org.example.recruitmentservice.models.entity.CVAnalysis;
 import org.example.recruitmentservice.models.entity.CandidateCV;
 import org.example.recruitmentservice.models.entity.Positions;
+import org.example.recruitmentservice.models.enums.RecruitmentStage;
 import org.example.recruitmentservice.repository.CVAnalysisRepository;
 import org.example.recruitmentservice.repository.CandidateCVRepository;
 import org.example.recruitmentservice.repository.PositionRepository;
@@ -94,8 +95,8 @@ public class ChatbotInternalService {
          */
         public CvStatisticsResponse getCvStatistics(int positionId, int passThreshold, String mode) {
                 org.example.recruitmentservice.models.enums.SourceType sourceType = "HR_MODE".equals(mode)
-                                ? org.example.recruitmentservice.models.enums.SourceType.HR
-                                : org.example.recruitmentservice.models.enums.SourceType.CANDIDATE;
+                                ? org.example.recruitmentservice.models.enums.SourceType.INTERNAL
+                                : org.example.recruitmentservice.models.enums.SourceType.EXTERNAL;
                 long total = candidateCVRepository.countByPositionIdAndSourceType(positionId, sourceType);
                 long scored = cvAnalysisRepository.countScoredByPositionIdAndSourceType(positionId, sourceType);
                 long passed = cvAnalysisRepository.countPassedByPositionIdAndSourceType(positionId, sourceType,
@@ -135,7 +136,7 @@ public class ChatbotInternalService {
                                         Integer score = cvAnalysisRepository.findByCandidateCV_Id(cv.getId())
                                                         .map(a -> a.getTechnicalScore())
                                                         .orElse(null);
-                                        String posName = cv.getPosition() != null ? cv.getPosition().getName() : null;
+                                        String posName = cv.getPosition() != null ? cv.getPosition().getTitle() : null;
                                         String status = matchStatus != null ? matchStatus.name() : "PENDING";
                                         return CandidateApplicationStatusResponse.ApplicationRecord.builder()
                                                         .positionId(cv.getPosition() != null ? cv.getPosition().getId()
@@ -161,13 +162,13 @@ public class ChatbotInternalService {
                         return;
 
                 candidateCVRepository.findById(appCvId).ifPresent(cv -> {
-                        org.example.recruitmentservice.models.enums.RecruitmentStage newStage = null;
+                        RecruitmentStage newStage = null;
                         switch (emailType.toUpperCase()) {
                                 case "INTERVIEW_INVITE":
-                                        newStage = org.example.recruitmentservice.models.enums.RecruitmentStage.INTERVIEW_INVITED;
+                                        newStage = RecruitmentStage.INTERVIEW_SCHEDULED;
                                         break;
                                 case "OFFER_LETTER":
-                                        newStage = org.example.recruitmentservice.models.enums.RecruitmentStage.OFFER_SENT;
+                                        newStage = org.example.recruitmentservice.models.enums.RecruitmentStage.OFFER;
                                         break;
                                 case "REJECTION":
                                         newStage = org.example.recruitmentservice.models.enums.RecruitmentStage.REJECTED;
@@ -196,17 +197,14 @@ public class ChatbotInternalService {
                 analysis.setCandidateCV(cv);
                 analysis.setPositionId(request.getPositionId());
                 if (cv.getPosition() != null) {
-                        analysis.setPositionName(cv.getPosition().getName());
+                        analysis.setPositionName(cv.getPosition().getTitle());
                 }
 
                 analysis.setTechnicalScore(request.getTechnicalScore());
                 analysis.setExperienceScore(request.getExperienceScore());
                 analysis.setOverallStatus(request.getOverallStatus());
-                analysis.setFeedback(request.getFeedback());
-                analysis.setSkillMatch(request.getSkillMatch());
-                analysis.setSkillMiss(request.getSkillMiss());
+                analysis.setAiAssessment(request.getAiAssessment());
                 analysis.setLearningPath(request.getLearningPath());
-                analysis.setAnalyzedAt(java.time.LocalDateTime.now());
                 analysis.setAnalysisMethod("LLM");
 
                 cvAnalysisRepository.save(analysis);
@@ -219,9 +217,8 @@ public class ChatbotInternalService {
         private PositionDetailsResponse toPositionDetailsResponse(Positions position) {
                 return PositionDetailsResponse.builder()
                                 .id(position.getId())
-                                .name(position.getName())
-                                .language(position.getLanguage())
-                                .level(position.getLevel())
+                                .title(position.getTitle())
+                                .seniority(position.getSeniority())
                                 .jdText(position.getJobDescription())
                                 .build();
         }
@@ -232,15 +229,15 @@ public class ChatbotInternalService {
                                 : null;
                 return ActivePositionResponse.builder()
                                 .id(position.getId())
-                                .name(position.getName())
-                                .language(position.getLanguage())
-                                .level(position.getLevel())
+                                .title(position.getTitle())
+                                .seniority(position.getSeniority())
+                                .skills(position.getSkills())
+                                .minimumFitScore(position.getMinimumFitScore())
                                 .openedAt(openedAt)
                                 .build();
         }
 
-        private ApplicationSummaryResponse toApplicationSummaryResponse(CandidateCV cv,
-                        org.example.recruitmentservice.models.entity.CVAnalysis analysis) {
+        private ApplicationSummaryResponse toApplicationSummaryResponse(CandidateCV cv, CVAnalysis analysis) {
                 ApplicationSummaryResponse.ApplicationSummaryResponseBuilder builder = ApplicationSummaryResponse
                                 .builder()
                                 .candidateId(cv.getCandidateId())
@@ -252,9 +249,7 @@ public class ChatbotInternalService {
 
                 if (analysis != null) {
                         builder.score(analysis.getTechnicalScore())
-                                        .feedback(analysis.getFeedback())
-                                        .skillMatch(analysis.getSkillMatch())
-                                        .skillMiss(analysis.getSkillMiss());
+                                        .aiAssessment(analysis.getAiAssessment());
                 }
 
                 return builder.build();

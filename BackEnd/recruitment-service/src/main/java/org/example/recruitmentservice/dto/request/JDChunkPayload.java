@@ -16,9 +16,8 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class JDChunkPayload {
     private Integer positionId;
-    private String positionName;
-    private String language;
-    private String level;
+    private String positionTitle;
+    private String seniority;
     private int chunkIndex;
     private String sectionName;
     private String chunkText;

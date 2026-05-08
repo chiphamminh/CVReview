@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.*;
 import org.example.recruitmentservice.models.enums.CVStatus;
 import org.example.recruitmentservice.models.enums.MatchStatus;
+import org.example.recruitmentservice.models.enums.RecruitmentStage;
 
 import java.time.LocalDateTime;
 
@@ -16,27 +17,24 @@ import java.time.LocalDateTime;
 public class CandidateCVResponse {
     private int cvId;
     private int positionId;
-    private String positionName;
+    private String positionTitle;
     private String email;
     private String name;
     private String batchId;
-    private String fileName;
-    private String filePath;
     private String driveFileUrl;
     private Integer technicalScore;
     private Integer experienceScore;
     private MatchStatus overallStatus;
-    private String feedback;
-    private String skillMatch;
-    private String skillMiss;
+    private String aiAssessment;
     private String learningPath;
     private CVStatus status;
+    private RecruitmentStage recruitmentStage;
     private String errorMessage;
     private LocalDateTime failedAt;
     private Integer retryCount;
     private Boolean canRetry;
-    private LocalDateTime analyzedAt;
+    private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    private LocalDateTime parsedAt;
-    private LocalDateTime scoredAt;
+    private LocalDateTime appliedDate;
+    private LocalDateTime interviewSchedule;
 }
