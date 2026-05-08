@@ -52,11 +52,10 @@ Evaluate this candidate and respond with ONLY a JSON object (no markdown) in thi
   "technicalScore": <integer 0-100>,
   "experienceScore": <integer 0-100>,
   "overallStatus": "<EXCELLENT_MATCH|GOOD_MATCH|POTENTIAL|POOR_FIT>",
-  "feedback": "<2-3 sentence summary>",
-  "skillMatch": "<comma-separated matched skills>",
-  "skillMiss": "<comma-separated missing skills or 'None'>"
+  "aiAssessment": "<2-3 sentence summary including matched skills, missing skills, and overall recommendation>"
 }}
-NOTE: Do NOT include learningPath. This is an HR tool for recruiter decisions, not candidate coaching."""
+NOTE: Do NOT include learningPath. This is an HR tool for recruiter decisions, not candidate coaching.
+- Consolidate skill match/miss observations and overall feedback into the single aiAssessment field."""
 
         print("HR scoring_prompt: ", scoring_prompt)
 
@@ -77,9 +76,7 @@ NOTE: Do NOT include learningPath. This is an HR tool for recruiter decisions, n
                         technical_score=score_data.get("technicalScore", 0),
                         experience_score=score_data.get("experienceScore", 0),
                         overall_status=score_data.get("overallStatus", "POOR_FIT"),
-                        feedback=score_data.get("feedback", ""),
-                        skill_match=score_data.get("skillMatch", ""),
-                        skill_miss=score_data.get("skillMiss", ""),
+                        ai_assessment=score_data.get("aiAssessment", ""),
                         learning_path=None,
                         session_id=state["session_id"],
                     )

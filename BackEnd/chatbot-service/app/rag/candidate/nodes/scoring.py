@@ -62,9 +62,7 @@ Return EXACTLY this JSON array (no markdown, no preamble):
     "technicalScore": <0-100>,
     "experienceScore": <0-100>,
     "overallStatus": "<EXCELLENT_MATCH|GOOD_MATCH|POTENTIAL|POOR_FIT>",
-    "feedback": "<1 concise HR-tone sentence>",
-    "skillMatch": ["<skill>", "<skill>"],
-    "skillMiss": ["<skill>", "<skill>"],
+    "aiAssessment": "<1 concise HR-tone sentence summarising matched and missing skills>",
     "learningPath": "<90-day roadmap string or null>"
   }}
 ]"""
@@ -77,10 +75,9 @@ def _build_jds_block(jd_context: list) -> str:
         payload  = jd.get("payload", {})
         jd_id    = payload.get("positionId", "unknown")
         jd_title = " ".join(filter(None, [
-            payload.get("positionName"),
-            payload.get("language"),
-            payload.get("level"),
-        ])) or payload.get("positionName", "Unknown Position")
+            payload.get("positionTitle"),
+            payload.get("seniority"),
+        ])) or payload.get("positionTitle", "Unknown Position")
         jd_text  = payload.get("jdText", "")
         block += f"\n[JD ID: {jd_id} | Title: {jd_title}]\n{jd_text}\n"
     return block

@@ -16,9 +16,8 @@ import java.util.List;
 @AllArgsConstructor
 public class JDChunkedEvent {
     private Integer positionId;
-    private String positionName;
-    private String language;
-    private String level;
+    private String positionTitle;
+    private String seniority;
     private List<JDChunkPayload> chunks;
     private Integer totalChunks;
     private Integer totalTokens;

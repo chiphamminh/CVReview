@@ -60,5 +60,16 @@
 - [x] 3. Chạy DB Migration (hoặc update schema nếu dùng Hibernate auto-ddl).
 - [x] 4. Sửa các Repositories đang query dựa trên cột cũ.
 - [x] 5. Refactor `PositionService` (chỉnh sửa method update JD, logic filter, sync `minimum_fit_score`).
-- [ ] 6. Refactor CV/Analysis Services (xóa logic update file, thêm logic update info cơ bản).
-- [ ] 7. Code các service chức năng gửi Mail & Notification.
+
+### Phase 2: Python Services & Vector DB Synchronization (🔥 Mới thêm)
+- [x] 6. **Đồng bộ cấu trúc dữ liệu cho Embedding Service:** Cập nhật `cv_consumer.py` và `jd_consumer.py` để nhận đúng các field mới (`positionTitle`, `seniority`, `skills`) và map Enum `INTERNAL`/`EXTERNAL`.
+- [x] 7. **Đồng bộ logic cho Chatbot Service:** 
+  - Sửa các Qdrant filter trong `retrieval.py`, `scope.py` từ `HR`/`CANDIDATE` sang `INTERNAL`/`EXTERNAL`.
+  - Cập nhật các Prompt và Tools RAG để dùng field mới `aiAssessment` (thay vì `skillMatch`/`skillMiss`).
+  - Cập nhật Mode A JD payload builder từ `name`/`language`/`level` → `title`/`seniority`.
+  - Cập nhật `recruitment_api.py` để gửi `aiAssessment` thay vì `feedback`/`skillMatch`/`skillMiss`.
+- [ ] 8. **Thực thi Qdrant Migration:** Chạy script `migrate_qdrant_source_type.py` để cập nhật lại các point cũ trên Vector DB.
+
+### Phase 3: Remaining Java Services
+- [ ] 9. Refactor CV/Analysis Services (xóa logic update file, thêm logic update info cơ bản).
+- [ ] 10. Code các service chức năng gửi Mail & Notification.

@@ -83,7 +83,7 @@ def _build_hr_base_filters(position_id: int) -> List:
     """Must-filters for HR-uploaded CVs (HR_MODE)."""
     return [
         FieldCondition(key="positionId",  match=MatchValue(value=position_id)),
-        FieldCondition(key="sourceType",  match=MatchValue(value="HR")),
+        FieldCondition(key="sourceType",  match=MatchValue(value="INTERNAL")),
         FieldCondition(key="is_latest",   match=MatchValue(value=True)),
     ]
 
@@ -92,7 +92,7 @@ def _build_candidate_base_filters(position_id: int) -> List:
     """Must-filters for candidate-applied CVs (CANDIDATE_MODE)."""
     return [
         FieldCondition(key="applied_position_ids", match=MatchAny(any=[position_id])),
-        FieldCondition(key="sourceType",           match=MatchValue(value="CANDIDATE")),
+        FieldCondition(key="sourceType",           match=MatchValue(value="EXTERNAL")),
         FieldCondition(key="is_latest",            match=MatchValue(value=True)),
     ]
 

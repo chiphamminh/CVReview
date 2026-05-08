@@ -161,11 +161,10 @@ async def _retrieve_jd_search(state: CandidateChatState) -> CandidateChatState:
                     {
                         "score": 1.0,
                         "payload": {
-                            "positionId":   jd["id"],
-                            "positionName": jd.get("name", ""),
-                            "language":     jd.get("language", ""),
-                            "level":        jd.get("level", ""),
-                            "jdText":       jd.get("jdText", ""),
+                            "positionId":    jd["id"],
+                            "positionTitle": jd.get("title", ""),
+                            "seniority":     jd.get("seniority", ""),
+                            "jdText":        jd.get("jdText", ""),
                         },
                     }
                     for jd in full_jd_list

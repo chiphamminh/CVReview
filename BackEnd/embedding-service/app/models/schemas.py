@@ -2,8 +2,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
 
-
-# ===== Phase 3 CV Models (Reverted to use Java Chunking) =====
+# CV Models
 class CVChunk(BaseModel):
     """Single chunk from CV (matches Java ChunkPayload)"""
     candidateId: Optional[str] = None

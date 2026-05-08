@@ -340,7 +340,6 @@ public class PositionService {
             JDChunkedEvent event = new JDChunkedEvent(
                     position.getId(),
                     PositionUtils.formatPositionTitle(position.getSeniority(), position.getTitle()),
-                    null,
                     position.getSeniority(),
                     chunks,
                     chunks.size(),

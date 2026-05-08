@@ -368,7 +368,7 @@ def build_jd_context(jd_docs: list) -> str:
     context_parts = []
     for i, doc in enumerate(jd_docs, 1):
         payload  = doc.get("payload", {})
-        position = payload.get("positionName") or payload.get("position", "Unknown Position")
+        position = payload.get("positionTitle") or payload.get("positionName") or payload.get("position", "Unknown Position")
         jd_id    = payload.get("positionId") or payload.get("jdId", "N/A")
         jd_text  = (payload.get("jdText") or payload.get("chunkText", "")).strip()
         score    = doc.get("reranker_score", doc.get("score", 0))
@@ -403,9 +403,7 @@ def build_scored_jobs_context(scored_jobs: list) -> str:
             f"Technical: {job.get('technicalScore', 'N/A')}/100 | "
             f"Experience: {job.get('experienceScore', 'N/A')}/100 | "
             f"Status: {job.get('overallStatus', 'N/A')}\n"
-            f"  Skills Matched: {job.get('skillMatch', 'N/A')}\n"
-            f"  Skills Missing: {job.get('skillMiss', 'N/A')}\n"
-            f"  Feedback: {job.get('feedback', 'N/A')}\n"
+            f"  AI Assessment: {job.get('aiAssessment', 'N/A')}\n"
             f"  Learning Path: {job.get('learningPath', 'N/A')}"
         )
     return "\n\n".join(lines)

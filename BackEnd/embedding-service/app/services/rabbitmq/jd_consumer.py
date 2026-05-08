@@ -39,7 +39,7 @@ def _validate_jd_chunked_event(event: dict) -> None:
     Raises ValueError for any structural or content violation so the
     message is nack'd immediately and routes to DLQ without retrying.
     """
-    required_top = ["positionId", "positionName", "chunks", "totalChunks"]
+    required_top = ["positionId", "positionTitle", "chunks", "totalChunks"]
     for field in required_top:
         if field not in event:
             raise ValueError(f"Missing required field: '{field}'")
@@ -84,12 +84,11 @@ async def _embed_jd_chunks(event: dict) -> None:
     start_time = time.time()
 
     position_id   = event["positionId"]
-    position_name = event.get("positionName", "")
-    language      = event.get("language", "")
-    level         = event.get("level", "")
+    position_title = event.get("positionTitle", "")
+    seniority      = event.get("seniority", "")
     chunks: List[dict] = event["chunks"]
 
-    print(f"[JD] Processing {len(chunks)} chunks for position {position_id} ({position_name})...")
+    print(f"[JD] Processing {len(chunks)} chunks for position {position_id} ({position_title})...")
 
     # 1. Batch-embed all chunk texts in one pass (efficient GPU/CPU usage)
     chunk_texts = [c["chunkText"] for c in chunks]
@@ -132,8 +131,9 @@ async def _embed_jd_chunks(event: dict) -> None:
 
         payload = {
             # Parent identifiers — used for Small-to-Big lookup by chatbot-service
-            "positionId":   position_id,
-            "positionName": position_name,
+            "positionId":    position_id,
+            "positionTitle": position_title,
+            "seniority":     seniority,
 
             # Chunk metadata
             "sectionName":    chunk.get("sectionName", ""),

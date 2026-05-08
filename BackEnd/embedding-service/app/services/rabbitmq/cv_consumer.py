@@ -114,7 +114,7 @@ async def embed_cv_from_event(event: dict, channel: aio_pika.Channel):
             source_type = chunk.get("sourceType", "")
             position_id_val = chunk.get("positionId")
             
-            applied_position_ids = [position_id_val] if source_type == "CANDIDATE" and position_id_val is not None else []
+            applied_position_ids = [position_id_val] if source_type == "EXTERNAL" and position_id_val is not None else []
             
             payload = {
                 "cvId": cv_id,

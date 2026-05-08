@@ -31,16 +31,12 @@ async def get_candidate_details(candidate_id: str, position_id: int) -> str:
         if not details:
             return "Không tìm thấy thông tin chi tiết cho ứng viên này."
 
-        score     = details.get("score", "N/A")
-        feedback  = details.get("feedback", "Không có nhận xét.")
-        skill_match = details.get("skillMatch", "N/A")
-        skill_miss  = details.get("skillMiss", "N/A")
+        score       = details.get("score", "N/A")
+        ai_assessment = details.get("aiAssessment", "Không có nhận xét.")
 
         return (
             f"**Điểm AI:** {score}/100\n"
-            f"**Nhận xét:** {feedback}\n"
-            f"**Kỹ năng phù hợp:** {skill_match}\n"
-            f"**Kỹ năng còn thiếu:** {skill_miss}\n"
+            f"**Nhận xét tổng hợp:** {ai_assessment}\n"
             f"\n_Để xem chi tiết CV đầy đủ, HR có thể vào phần **View CV** trên hệ thống._"
         )
     except Exception as e:
@@ -156,7 +152,7 @@ async def search_candidates_by_criteria(
         if not applications:
             return f"Không có ứng viên nào trong vị trí ID {position_id}."
 
-        target_source = "HR" if mode == "HR_MODE" else "CANDIDATE"
+        target_source = "INTERNAL" if mode == "HR_MODE" else "EXTERNAL"
         results = [app for app in applications if app.get("sourceType") == target_source]
 
         if min_score is not None:

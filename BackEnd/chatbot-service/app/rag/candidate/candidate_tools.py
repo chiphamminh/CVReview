@@ -29,9 +29,7 @@ async def finalize_application(
     overall_status: str,
     technical_score: int,
     experience_score: int,
-    feedback: str,
-    skill_match: str,
-    skill_miss: str,
+    ai_assessment: str,
     learning_path: Optional[str],
     candidate_id: str,
     session_id: str,
@@ -44,9 +42,7 @@ async def finalize_application(
         overall_status:   MatchStatus (EXCELLENT_MATCH / GOOD_MATCH / POTENTIAL)
         technical_score:  Điểm kỹ thuật (0-100)
         experience_score: Điểm kinh nghiệm (0-100)
-        feedback:         Nhận xét chung từ quá trình đánh giá
-        skill_match:      Các kỹ năng phù hợp với yêu cầu vị trí
-        skill_miss:       Các kỹ năng còn thiếu so với yêu cầu vị trí
+        ai_assessment:    Nhận xét AI tổng hợp (bao gồm skill match/miss và đánh giá chung)
         learning_path:    Lộ trình học tập (None cho EXCELLENT_MATCH / GOOD_MATCH)
         candidate_id:     UUID của ứng viên (tự động inject từ session)
         session_id:       ID phiên hội thoại (tự động inject từ session)
@@ -64,9 +60,7 @@ async def finalize_application(
             technical_score=technical_score,
             experience_score=experience_score,
             overall_status=overall_status,
-            feedback=feedback,
-            skill_match=skill_match,
-            skill_miss=skill_miss,
+            ai_assessment=ai_assessment,
             learning_path=learning_path,
             session_id=session_id,
         )

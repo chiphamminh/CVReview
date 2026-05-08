@@ -93,9 +93,7 @@ class RecruitmentAPI:
         technical_score: int,
         experience_score: int,
         overall_status: str,
-        feedback: str,
-        skill_match: str,
-        skill_miss: str,
+        ai_assessment: str,
         learning_path: Optional[str],
         session_id: str
     ) -> Dict[str, Any]:
@@ -106,9 +104,7 @@ class RecruitmentAPI:
                 "technicalScore": technical_score,
                 "experienceScore": experience_score,
                 "overallStatus": overall_status,
-                "feedback": feedback,
-                "skillMatch": skill_match,
-                "skillMiss": skill_miss,
+                "aiAssessment": ai_assessment,
                 "learningPath": learning_path,
                 "sessionId": session_id
             }
@@ -141,9 +137,7 @@ class RecruitmentAPI:
         technical_score: int,
         experience_score: int,
         overall_status: str,
-        feedback: str,
-        skill_match: str,
-        skill_miss: str,
+        ai_assessment: str,
         learning_path: Optional[str],
         session_id: str
     ) -> Dict[str, Any]:
@@ -155,9 +149,7 @@ class RecruitmentAPI:
                 "technicalScore": technical_score,
                 "experienceScore": experience_score,
                 "overallStatus": overall_status,
-                "feedback": feedback,
-                "skillMatch": skill_match,
-                "skillMiss": skill_miss,
+                "aiAssessment": ai_assessment,
                 "learningPath": learning_path,
                 "sessionId": session_id
             }
