@@ -6,6 +6,8 @@ import lombok.*;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import org.example.recruitmentservice.models.enums.JDStatus;
+
 @Getter
 @Setter
 @AllArgsConstructor
@@ -22,10 +24,11 @@ public class PositionsResponse {
     private String driveFileUrl;
     private String jdText;
     private Boolean isActive;
-    private LocalDateTime openedAt;
-    private org.example.recruitmentservice.models.enums.JDStatus status;
+    private JDStatus status;
     private String batchId;
     private Integer totalCVs;
+    private LocalDateTime openedAt;
+    private LocalDateTime closedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 

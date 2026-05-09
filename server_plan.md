@@ -154,22 +154,22 @@ if avg_score < min_score:
 ### Phase 3 Sprint B — Auto Stage Scheduler *(Ưu tiên 2)*
 > **Mục tiêu:** Tự động chuyển `INTERVIEW_SCHEDULED → INTERVIEWED` sau khi qua ngày phỏng vấn.
 
-- [ ] **B1.** Thêm query vào `CandidateCVRepository`: tìm CV có `recruitmentStage = INTERVIEW_SCHEDULED` và `interviewSchedule <= now()`.
-- [ ] **B2.** Tạo `InterviewAutoTransitionScheduler.java` — `@Scheduled(fixedDelay = 900_000)` (15 phút):
+- [x] **B1.** Thêm query vào `CandidateCVRepository`: tìm CV có `recruitmentStage = INTERVIEW_SCHEDULED` và `interviewSchedule <= now()`.
+- [x] **B2.** Tạo `InterviewAutoTransitionScheduler.java` — `@Scheduled(fixedDelay = 900_000)` (15 phút):
   - Gọi query B1.
   - Batch-update `recruitmentStage = INTERVIEWED`.
   - Log số lượng record được chuyển.
 
 ---
 
-### Phase 3 Sprint C — Position Filter & Toggle Active *(Ưu tiên 3)*
+### Phase 3 Sprint C — Position Filter & Toggle Active ✅
 > **Mục tiêu:** Gộp các method filter position thành 1, thêm toggle active.
 
-- [ ] **C1.** Xóa `getPositions()`, `searchPositions()`, `getAllPositions()` khỏi `PositionService`. Thêm `filterPositions(keyword, isActive, page, size)` dùng JPQL dynamic (`:param IS NULL OR ...`).
-- [ ] **C2.** Thêm method `toggleActiveStatus(positionId)` vào `PositionService`:
+- [x] **C1.** Xóa `getPositions()`, `searchPositions()`, `getAllPositions()` khỏi `PositionService`. Thêm `filterPositions(keyword, isActive, page, size)` dùng JPQL dynamic (`:param IS NULL OR ...`).
+- [x] **C2.** Thêm method `toggleActiveStatus(positionId)` vào `PositionService`:
   - `isActive = true` → set `false`, `closedAt = now()`.
   - `isActive = false` → set `true`, `closedAt = null`, `openedAt = now()`.
-- [ ] **C3.** Cập nhật `PositionController`:
+- [x] **C3.** Cập nhật `PositionController`:
   - `GET /positions` (thay thế 3 endpoints cũ)
   - `PATCH /positions/{id}/toggle-active`
 

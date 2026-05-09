@@ -1,6 +1,8 @@
 package org.example.recruitmentservice.repository;
 
 import org.example.recruitmentservice.models.entity.Positions;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -14,16 +16,14 @@ public interface PositionRepository extends JpaRepository<Positions, Integer> {
         Optional<Positions> findByTitleAndSeniority(String title, String seniority);
 
         @Query("SELECT p FROM Positions p " +
-                        "WHERE (:title IS NULL OR LOWER(p.title) = LOWER(:title)) " +
-                        "AND (:seniority IS NULL OR LOWER(p.seniority) = LOWER(:seniority))")
-        List<Positions> findByFilters(@Param("title") String title,
-                        @Param("seniority") String seniority);
-
-        @Query("SELECT DISTINCT p FROM Positions p LEFT JOIN p.skills s " +
-                        "WHERE LOWER(p.title) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
-                        "   OR LOWER(p.seniority) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
-                        "   OR LOWER(s) LIKE LOWER(CONCAT('%', :keyword, '%'))")
-        List<Positions> searchByKeyword(@Param("keyword") String keyword);
+                        "WHERE (:keyword IS NULL OR :keyword = '' " +
+                        "       OR LOWER(p.title) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+                        "       OR LOWER(p.seniority) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+                        "AND (:isActive IS NULL OR p.isActive = :isActive)")
+        Page<Positions> filterPositions(
+                        @Param("keyword") String keyword,
+                        @Param("isActive") Boolean isActive,
+                        Pageable pageable);
 
         @Query("SELECT p FROM Positions p JOIN p.candidateCVs c WHERE c.id = :cvId")
         Positions findByCandidateCVId(@Param("cvId") int cvId);

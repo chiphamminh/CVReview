@@ -31,7 +31,6 @@ import org.example.recruitmentservice.utils.PositionUtils;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -168,21 +167,33 @@ public class PositionService {
                 response);
     }
 
-    public ApiResponse<List<PositionsResponse>> getPositions(String title, String seniority) {
-        List<Positions> positionsList = positionRepository.findByFilters(title, seniority);
+    public ApiResponse<PageResponse<PositionsResponse>> filterPositions(String keyword, Boolean isActive, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        Page<Positions> positionPage = positionRepository.filterPositions(keyword, isActive, pageable);
+        Page<PositionsResponse> mappedPage = positionPage.map(this::toResponse);
+        return ApiResponse.<PageResponse<PositionsResponse>>builder()
+                .statusCode(ErrorCode.SUCCESS.getCode())
+                .message(ErrorCode.SUCCESS.getMessage())
+                .data(PageUtil.toPageResponse(mappedPage))
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
 
-        if (positionsList.isEmpty()) {
+    @Transactional
+    public void toggleActiveStatus(int positionId) {
+        Positions position = positionRepository.findById(positionId);
+        if (position == null) {
             throw new CustomException(ErrorCode.POSITION_NOT_FOUND);
         }
-
-        List<PositionsResponse> response = positionsList.stream()
-                .map(this::toResponse)
-                .toList();
-
-        return new ApiResponse<>(
-                ErrorCode.SUCCESS.getCode(),
-                ErrorCode.SUCCESS.getMessage(),
-                response);
+        if (position.isActive()) {
+            position.setActive(false);
+            position.setClosedAt(LocalDateTime.now());
+        } else {
+            position.setActive(true);
+            position.setOpenedAt(LocalDateTime.now());
+            position.setClosedAt(null);
+        }
+        positionRepository.save(position);
     }
 
     public ApiResponse<PositionsResponse> getJdText(int positionId) {
@@ -200,45 +211,6 @@ public class PositionService {
                 ErrorCode.SUCCESS.getCode(),
                 ErrorCode.SUCCESS.getMessage(),
                 positionsResponse);
-    }
-
-    public ApiResponse<PageResponse<PositionsResponse>> getAllPositions(int page, int size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        Page<Positions> positionPage = positionRepository.findAll(pageable);
-
-        Page<PositionsResponse> mappedPage = positionPage.map(this::toResponse);
-
-        return ApiResponse.<PageResponse<PositionsResponse>>builder()
-                .statusCode(ErrorCode.SUCCESS.getCode())
-                .message("Fetched all positions successfully")
-                .data(PageUtil.toPageResponse(mappedPage))
-                .timestamp(LocalDateTime.now())
-                .build();
-    }
-
-    public ApiResponse<List<PositionsResponse>> searchPositions(String keyword) {
-        if (keyword == null || keyword.trim().isEmpty()) {
-            return new ApiResponse<>(ErrorCode.POSITION_NOT_FOUND.getCode(),
-                    ErrorCode.POSITION_NOT_FOUND.getMessage());
-        }
-
-        String[] words = keyword.trim().toLowerCase().split("\\s+");
-        List<Positions> all = positionRepository.findAll();
-
-        List<Positions> filtered = all.stream()
-                .filter(p -> {
-                    String combined = (p.getTitle() + " " + p.getSeniority() + " "
-                            + String.join(" ", p.getSkills()))
-                            .toLowerCase();
-                    return Arrays.stream(words).allMatch(combined::contains);
-                })
-                .toList();
-
-        List<PositionsResponse> responseList = filtered.stream()
-                .map(this::toResponse)
-                .toList();
-
-        return new ApiResponse<>(ErrorCode.SUCCESS.getCode(), ErrorCode.SUCCESS.getMessage(), responseList);
     }
 
     /**
@@ -325,6 +297,7 @@ public class PositionService {
                 .totalCVs(totalCVs)
                 .isActive(position.isActive())
                 .openedAt(position.getOpenedAt())
+                .closedAt(position.getClosedAt())
                 .createdAt(position.getCreatedAt())
                 .build();
     }

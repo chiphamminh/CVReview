@@ -29,32 +29,27 @@ public class PositionController {
         return ResponseEntity.ok(positionService.createPosition(positionsRequest, request));
     }
 
-    @PreAuthorize("hasRole('HR')")
+    @PreAuthorize("hasAnyRole('HR', 'CANDIDATE')")
     @GetMapping
-    public ResponseEntity<ApiResponse<List<PositionsResponse>>> getPositions(
-            @RequestParam(required = false) String title,
-            @RequestParam(required = false) String seniority) {
-        return ResponseEntity.ok(positionService.getPositions(title, seniority));
+    public ResponseEntity<ApiResponse<PageResponse<PositionsResponse>>> filterPositions(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Boolean isActive,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return ResponseEntity.ok(positionService.filterPositions(keyword, isActive, page, size));
+    }
+
+    @PreAuthorize("hasRole('HR')")
+    @PatchMapping("/{positionId}/toggle-active")
+    public ResponseEntity<ApiResponse<Object>> toggleActiveStatus(@PathVariable int positionId) {
+        positionService.toggleActiveStatus(positionId);
+        return ResponseEntity.ok(new ApiResponse<>(ErrorCode.SUCCESS.getCode(), "Updated successfully"));
     }
 
     @GetMapping("/jd/{positionId}/text")
     public ResponseEntity<ApiResponse<PositionsResponse>> getJdText(
             @PathVariable int positionId) {
         return ResponseEntity.ok(positionService.getJdText(positionId));
-    }
-
-    @PreAuthorize("hasAnyRole('HR', 'CANDIDATE')")
-    @GetMapping("/all")
-    public ApiResponse<PageResponse<PositionsResponse>> getAllPositions(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
-        return positionService.getAllPositions(page, size);
-    }
-
-    @PreAuthorize("hasAnyRole('HR', 'CANDIDATE')")
-    @GetMapping("/search")
-    public ResponseEntity<ApiResponse<List<PositionsResponse>>> searchPositions(@RequestParam String keyword) {
-        return ResponseEntity.ok(positionService.searchPositions(keyword));
     }
 
     @PreAuthorize("hasRole('HR')")

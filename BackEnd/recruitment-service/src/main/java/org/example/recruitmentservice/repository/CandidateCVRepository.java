@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -131,4 +132,11 @@ public interface CandidateCVRepository extends JpaRepository<CandidateCV, Intege
                      @Param("sourceType") SourceType sourceType,
                      @Param("cvStatus") CVStatus cvStatus,
                      Pageable pageable);
+
+       /** Tìm các CV đã qua ngày phỏng vấn mà vẫn đang ở stage INTERVIEW_SCHEDULED. */
+       @Query("SELECT c FROM CandidateCV c " +
+                     "WHERE c.recruitmentStage = :stage AND c.interviewSchedule <= :now AND c.deletedAt IS NULL")
+       List<CandidateCV> findInterviewsPastDue(
+                     @Param("stage") RecruitmentStage stage,
+                     @Param("now") LocalDateTime now);
 }
