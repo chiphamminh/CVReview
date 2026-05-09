@@ -11,11 +11,12 @@ import java.util.List;
 @AllArgsConstructor
 public class BatchStatusResponse {
     private String batchId;
-    private Integer processedCv;
-    private Integer totalCv;
-    private Integer successCv;
-    private Integer failedCv;
-    private List<Integer> failedCvIds;
+    private Integer processed;
+    private Integer total;
+    private Integer success;
+    private Integer failed;
+    /** Populated only for CV_UPLOAD batches; null/absent for JD_UPLOAD. */
+    private List<Integer> failedIds;
     private Double progress;
     private Integer pending;
     private String status;

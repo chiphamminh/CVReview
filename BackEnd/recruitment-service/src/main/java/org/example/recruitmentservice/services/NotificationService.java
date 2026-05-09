@@ -55,7 +55,6 @@ public class NotificationService {
         return switch (emailType) {
             case INTERVIEW_INVITE -> "[CV Review] Thư Mời Phỏng Vấn — " + positionName;
             case OFFER_LETTER     -> "[CV Review] Chúc Mừng Trúng Tuyển — " + positionName;
-            case REJECTION        -> "[CV Review] Kết Quả Ứng Tuyển — " + positionName;
         };
     }
 
@@ -63,7 +62,6 @@ public class NotificationService {
         return switch (emailType) {
             case INTERVIEW_INVITE -> "email/interview-invite";
             case OFFER_LETTER     -> "email/offer-letter";
-            case REJECTION        -> "email/rejection";
         };
     }
 
@@ -73,6 +71,11 @@ public class NotificationService {
         ctx.setVariable("positionName", request.getPositionName());
         ctx.setVariable("interviewDate", request.getInterviewDate());
         ctx.setVariable("customMessage", request.getCustomMessage());
+        ctx.setVariable("benefit", request.getBenefit());
+        ctx.setVariable("salary", request.getSalary());
+        ctx.setVariable("startDate", request.getStartDate());
+        ctx.setVariable("offerExpirationDate", request.getOfferExpirationDate());
+        ctx.setVariable("additionalNote", request.getAdditionalNote());
         return templateEngine.process(templateName, ctx);
     }
 

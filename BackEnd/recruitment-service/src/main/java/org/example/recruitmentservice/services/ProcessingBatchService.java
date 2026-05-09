@@ -24,7 +24,6 @@ import java.util.List;
 import java.util.stream.Collectors;
 import org.example.recruitmentservice.repository.PositionRepository;
 import org.example.recruitmentservice.models.enums.JDStatus;
-import org.example.recruitmentservice.models.entity.Positions;
 
 @Slf4j
 @Service
@@ -35,13 +34,13 @@ public class ProcessingBatchService {
     private final PositionRepository positionRepository;
     private final SseEmitterRegistry sseEmitterRegistry;
 
-    public ProcessingBatch createBatch(String batchId, Integer positionId, int totalCv, BatchType type) {
+    public ProcessingBatch createBatch(String batchId, Integer positionId, int total, BatchType type) {
         ProcessingBatch batch = new ProcessingBatch();
         batch.setBatchId(batchId);
         batch.setPositionId(positionId);
-        batch.setTotalCv(totalCv);
-        batch.setSuccessCv(0);
-        batch.setFailedCv(0);
+        batch.setTotal(total);
+        batch.setSuccess(0);
+        batch.setFailed(0);
         batch.setStatus(BatchStatus.PROCESSING);
         batch.setType(type);
         batch.setCreatedAt(LocalDateTime.now());
@@ -65,21 +64,20 @@ public class ProcessingBatchService {
             actualFailed = candidateCVRepository.countByBatchIdAndCvStatus(batchId, CVStatus.FAILED);
         }
 
-        batch.setSuccessCv((int) actualSuccess);
-        batch.setFailedCv((int) actualFailed);
+        batch.setSuccess((int) actualSuccess);
+        batch.setFailed((int) actualFailed);
 
-        boolean isCompleted = batch.getProcessedCv() >= batch.getTotalCv();
+        boolean isCompleted = batch.getProcessed() >= batch.getTotal();
         if (isCompleted) {
             batch.setStatus(BatchStatus.COMPLETED);
             batch.setCompletedAt(LocalDateTime.now());
             log.info("Batch {} completed: {}/{} processed, {} success, {} failed",
-                    batchId, batch.getProcessedCv(), batch.getTotalCv(),
-                    batch.getSuccessCv(), batch.getFailedCv());
+                    batchId, batch.getProcessed(), batch.getTotal(),
+                    batch.getSuccess(), batch.getFailed());
         }
 
         batchRepository.save(batch);
 
-        // Push live update to FE via SSE after DB is persisted
         BatchStatusResponse snapshot = buildStatusSnapshot(batch, batchId);
         sseEmitterRegistry.send(batchId, snapshot);
         if (isCompleted) {
@@ -101,17 +99,12 @@ public class ProcessingBatchService {
 
     /**
      * Builds a BatchStatusResponse from the given batch entity.
-     * Fetches failed CV IDs from the DB. Used by both the REST endpoint and SSE
-     * push.
+     * For CV_UPLOAD batches, fetches failed CV IDs from DB.
+     * For JD_UPLOAD batches, failedIds is omitted (null) — not applicable.
      */
     private BatchStatusResponse buildStatusSnapshot(ProcessingBatch batch, String batchId) {
-        List<Integer> failedIds;
-        if (batch.getType() == BatchType.JD_UPLOAD) {
-            failedIds = positionRepository.findByBatchIdAndStatus(batchId, JDStatus.FAILED)
-                    .stream()
-                    .map(Positions::getId)
-                    .collect(Collectors.toList());
-        } else {
+        List<Integer> failedIds = null;
+        if (batch.getType() == BatchType.CV_UPLOAD) {
             failedIds = candidateCVRepository.findByBatchIdAndCvStatus(batchId, CVStatus.FAILED)
                     .stream()
                     .map(CandidateCV::getId)
@@ -120,15 +113,15 @@ public class ProcessingBatchService {
 
         return BatchStatusResponse.builder()
                 .batchId(batch.getBatchId())
-                .processedCv(batch.getProcessedCv())
-                .totalCv(batch.getTotalCv())
-                .successCv(batch.getSuccessCv())
-                .failedCv(batch.getFailedCv())
-                .failedCvIds(failedIds)
+                .processed(batch.getProcessed())
+                .total(batch.getTotal())
+                .success(batch.getSuccess())
+                .failed(batch.getFailed())
+                .failedIds(failedIds)
                 .progress(BigDecimal.valueOf(batch.getProgress())
                         .setScale(2, RoundingMode.HALF_UP)
                         .doubleValue())
-                .pending(batch.getPendingCv())
+                .pending(batch.getPending())
                 .status(batch.getStatus().name())
                 .createdAt(batch.getCreatedAt())
                 .completedAt(batch.getCompletedAt())

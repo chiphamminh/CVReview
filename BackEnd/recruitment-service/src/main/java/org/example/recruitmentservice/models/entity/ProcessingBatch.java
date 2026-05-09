@@ -29,13 +29,13 @@ public class ProcessingBatch {
     private Integer positionId;
 
     @Column(nullable = false)
-    private Integer totalCv;
+    private Integer total;
 
     @Column
-    private Integer successCv;
+    private Integer success;
 
     @Column
-    Integer failedCv;
+    Integer failed;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -51,17 +51,17 @@ public class ProcessingBatch {
     private LocalDateTime completedAt;
 
     @Transient
-    public Integer getProcessedCv() {
-        return successCv + failedCv;
+    public Integer getProcessed() {
+        return success + failed;
     }
 
     @Transient
     public Double getProgress() {
-        return (successCv + failedCv) * 100.0 / totalCv;
+        return (success + failed) * 100.0 / total;
     }
 
     @Transient
-    public Integer getPendingCv() {
-        return totalCv - successCv - failedCv;
+    public Integer getPending() {
+        return total - success - failed;
     }
 }

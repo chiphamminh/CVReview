@@ -3,6 +3,7 @@ package org.example.recruitmentservice.controller;
 import lombok.RequiredArgsConstructor;
 import org.example.commonlibrary.dto.response.ApiResponse;
 import org.example.recruitmentservice.dto.response.BatchStatusResponse;
+import org.example.recruitmentservice.models.enums.BatchStatus;
 import org.example.recruitmentservice.services.ProcessingBatchService;
 import org.example.recruitmentservice.sse.SseEmitterRegistry;
 import org.springframework.http.MediaType;
@@ -30,11 +31,12 @@ public class ProcessingBatchController {
     }
 
     /**
-     * SSE streaming endpoint. FE opens this once and receives push events on every CV processed.
+     * SSE streaming endpoint. FE opens this once and receives push events on every item processed.
      * Timeout is 5 minutes — sufficient for the largest expected batches.
      *
-     * Virtual Threads note: Spring MVC with virtual-threads enabled holds each SSE connection
-     * on a virtual thread (not a platform thread), so hundreds of concurrent streams are safe.
+     * If the batch is already COMPLETED when the client subscribes (e.g., on reconnect after
+     * all items failed), the final snapshot is sent immediately and the stream is closed
+     * to prevent the emitter from hanging until timeout.
      */
     @PreAuthorize("hasAnyRole('HR', 'CANDIDATE')")
     @GetMapping(value = "/{batchId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -42,10 +44,15 @@ public class ProcessingBatchController {
         SseEmitter emitter = new SseEmitter(300_000L);
         sseEmitterRegistry.register(batchId, emitter);
 
-        // Push current snapshot immediately so FE has data before the first CV finishes
         try {
             BatchStatusResponse current = processingBatchService.getBatchStatus(batchId).getData();
             emitter.send(SseEmitter.event().name("batch-update").data(current));
+
+            // If batch already finished, close the stream immediately
+            if (BatchStatus.COMPLETED.name().equals(current.getStatus())) {
+                emitter.send(SseEmitter.event().name("batch-completed").data("DONE"));
+                emitter.complete();
+            }
         } catch (Exception e) {
             emitter.completeWithError(e);
         }

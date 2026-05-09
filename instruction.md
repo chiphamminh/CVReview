@@ -88,3 +88,148 @@ Hệ thống áp dụng kiến trúc **Microservices** bất đồng bộ nhằm
 5. **Guardrail Nộp Đơn (Application Guardrail):** Function `finalize_application` trong Candidate Chatbot **KHÔNG BAO GIỜ** được phép thực thi nếu điểm phù hợp (score) **dưới 70 điểm**. Chatbot bắt buộc phải từ chối, giải thích thiếu sót kỹ năng và gợi ý lộ trình học tập.
 6. **Bảo mật Internal APIs:** Tất cả các endpoints có tiền tố `/internal/*` bắt buộc không được lộ ra ngoài qua API Gateway. Các endpoint này chỉ giao tiếp nội bộ trong mạng Docker và phải được bảo vệ bằng header xác thực nội bộ (ví dụ: `X-Internal-Service`).
 7. **Cập nhật CV:** Khi Candidate upload CV mới, tất cả `Application CVs` và `CVAnalysis` cũ đang ứng tuyển đều phải được **Soft-Delete**. Ứng viên phải nộp lại đơn ứng tuyển với CV mới.
+
+---
+
+## 5. Folder Structure (Cấu trúc thư mục)
+
+> Tổng quan cấu trúc thư mục toàn bộ dự án — cả FrontEnd (React/Vite) và BackEnd (Java Spring Boot + Python FastAPI Microservices).
+
+```
+CVReview/
+├── FrontEnd/                          # React + Vite SPA (HR Portal & Candidate Portal)
+│   └── src/
+│       ├── api/
+│       │   ├── axiosClient.js         # Axios instance với interceptor JWT
+│       │   └── mockData.js            # Mock data cho dev/test
+│       ├── assets/                    # Static assets (icons, images)
+│       ├── components/
+│       │   ├── candidate/             # Components dành riêng cho Candidate Portal
+│       │   ├── chatbot/               # Chatbot Drawer UI (HR & Candidate)
+│       │   ├── common/                # Shared components (Button, Badge, Spinner…)
+│       │   ├── modals/                # Modal dialogs (Upload, SendOffer, Confirm…)
+│       │   ├── tables/                # Data table components
+│       │   └── upload/                # Upload CV/JD components + progress tracking
+│       ├── hooks/                     # Custom React hooks
+│       ├── layouts/
+│       │   ├── HRLayout.jsx           # Layout chung cho HR Portal (sidebar, navbar)
+│       │   └── CandidateLayout.jsx    # Layout chung cho Candidate Portal
+│       ├── pages/
+│       │   ├── Login.jsx              # Trang đăng nhập chung
+│       │   ├── hr/
+│       │   │   ├── PositionsPage.jsx  # Quản lý vị trí tuyển dụng
+│       │   │   ├── CandidatesPage.jsx # Danh sách & sàng lọc ứng viên
+│       │   │   └── HRChatbotPage.jsx  # Giao diện HR Chatbot
+│       │   └── candidate/
+│       │       ├── CareerPage.jsx     # Trang tìm kiếm vị trí (Candidate)
+│       │       └── CVPage.jsx         # Trang quản lý Master CV
+│       ├── routes/                    # React Router config + ProtectedRoute
+│       ├── store/
+│       │   └── authStore.js           # Zustand store quản lý auth state
+│       ├── types/                     # JSDoc type definitions
+│       ├── utils/                     # Helper functions (format, validate…)
+│       ├── App.jsx
+│       └── main.jsx
+│
+└── BackEnd/                           # Microservices Architecture
+    ├── docker-compose.yml             # Orchestration toàn bộ services
+    ├── docker-compose-build.yml       # Build & push images lên registry
+    │
+    ├── common-library/                # [Spring Boot] Shared module dùng chung
+    │   └── src/main/java/.../commonlibrary/
+    │       ├── dto/                   # Shared DTOs & event payloads (RabbitMQ)
+    │       ├── exception/             # Global exception handlers & custom exceptions
+    │       └── utils/                 # Shared utility classes
+    │
+    ├── api-gateway/                   # [Spring Cloud Gateway] Entry point duy nhất
+    │   └── src/main/java/.../apigateway/
+    │       ├── config/                # Route config, CORS, filter chains
+    │       ├── controller/            # Health check endpoints
+    │       └── security/              # JWT validation filter
+    │
+    ├── auth-service/                  # [Spring Boot] Xác thực & phân quyền
+    │   └── src/main/java/.../authservice/
+    │       ├── config/                # Security config, Bean config
+    │       ├── controller/            # Auth endpoints (login, register, refresh)
+    │       ├── dto/                   # Request/Response DTOs
+    │       ├── models/                # User, Role entities
+    │       ├── repository/            # JPA Repositories
+    │       ├── security/              # JWT provider, UserDetailsService
+    │       ├── services/              # Business logic
+    │       └── utils/                 # Helper utilities
+    │
+    ├── recruitment-service/           # [Spring Boot] Service lõi - Quản lý nghiệp vụ tuyển dụng
+    │   └── src/main/java/.../recruitmentservice/
+    │       ├── client/                # Feign clients gọi sang embedding-service
+    │       ├── config/                # RabbitMQ, JPA, SSE, async config
+    │       ├── controller/            # REST Controllers:
+    │       │   ├── PositionController            # CRUD vị trí tuyển dụng
+    │       │   ├── CandidateCVController         # Upload & quản lý Master CV
+    │       │   ├── UploadCVController            # Batch upload CV (HR)
+    │       │   ├── ProcessingBatchController     # Quản lý batch processing
+    │       │   ├── ChunkingController            # Chunking & indexing pipeline
+    │       │   ├── AnalysisController            # CV Analysis results
+    │       │   ├── ChatbotInternalController     # Internal APIs cho chatbot-service
+    │       │   ├── ChatbotPublicController       # Public chatbot session APIs
+    │       │   ├── AdminCVController             # Admin CV management
+    │       │   └── AdminAnalyticsController      # Dashboard analytics
+    │       ├── dto/                   # Request/Response DTOs & Event payloads
+    │       ├── exception/             # Domain-specific custom exceptions
+    │       ├── listener/              # RabbitMQ event listeners (parse, embed, score)
+    │       ├── models/                # JPA Entities (Position, CV, Application, ChatSession…)
+    │       ├── repository/            # JPA Repositories
+    │       ├── scheduler/             # Scheduled jobs (cleanup, retry…)
+    │       ├── security/              # Internal API auth filter (X-Internal-Service)
+    │       ├── services/              # Business logic services
+    │       ├── sse/                   # Server-Sent Events emitter (streaming progress)
+    │       └── utils/                 # Helpers (file, date, string…)
+    │
+    ├── embedding-service/             # [Python FastAPI] Vector hóa CV & JD → Qdrant
+    │   └── app/
+    │       ├── main.py                # FastAPI app entry point
+    │       ├── config.py              # Env config (Qdrant, RabbitMQ, model)
+    │       ├── routers/
+    │       │   ├── cv.py              # Endpoints nhận CV chunks để embed
+    │       │   └── jd.py              # Endpoints nhận JD chunks để embed
+    │       ├── services/
+    │       │   ├── embedding.py       # BAAI/bge embedding model wrapper
+    │       │   ├── qdrant.py          # Qdrant upsert / delete operations
+    │       │   ├── rabbitmq/          # RabbitMQ consumers (CV & JD queues)
+    │       │   └── http_client.py     # HTTP client gọi recruitment-service
+    │       ├── models/                # Pydantic schemas
+    │       ├── worker_cv.py           # Entry point worker consume CV queue
+    │       └── worker_jd.py           # Entry point worker consume JD queue
+    │
+    └── chatbot-service/               # [Python FastAPI + LangGraph] RAG Chatbot Engine
+        └── app/
+            ├── main.py                # FastAPI app entry point
+            ├── config.py              # Env config (Qdrant, Gemini, Groq, RabbitMQ)
+            ├── api/routes/
+            │   ├── chat.py            # Shared chat endpoint (session-based)
+            │   ├── hr_chat.py         # HR-specific chat routing
+            │   ├── candidate_chat.py  # Candidate-specific chat routing
+            │   └── health.py          # Health check endpoint
+            ├── models/                # Pydantic schemas (ChatRequest, ChatResponse…)
+            ├── services/
+            │   ├── embedding.py       # Embedding wrapper (query vectorization)
+            │   ├── qdrant.py          # Qdrant search & filter operations
+            │   ├── retriever.py       # Two-Stage Pipeline: Vector Search → Rerank
+            │   ├── reranker.py        # LLM-based reranking & scoring
+            │   └── recruitment_api.py # HTTP client → recruitment-service internal APIs
+            └── rag/
+                ├── prompts.py         # Tất cả LLM prompts (HR & Candidate)
+                ├── intent.py          # Intent classification logic
+                ├── shared/            # Shared RAG utilities & context formatters
+                ├── hr/
+                │   ├── hr_graph.py    # LangGraph graph definition cho HR flow
+                │   ├── hr_tools.py    # Tool functions (search, email, interview Qs)
+                │   ├── router.py      # Intent router → node dispatcher
+                │   ├── state.py       # HR graph state schema
+                │   └── nodes/         # LangGraph node implementations
+                └── candidate/
+                    ├── candidate_graph.py  # LangGraph graph cho Candidate flow
+                    ├── candidate_tools.py  # Tool functions (search, apply)
+                    ├── router.py           # Intent router → node dispatcher
+                    ├── state.py            # Candidate graph state schema
+                    └── nodes/              # LangGraph node implementations
+```

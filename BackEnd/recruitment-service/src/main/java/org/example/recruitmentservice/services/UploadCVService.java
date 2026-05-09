@@ -187,12 +187,12 @@ public class UploadCVService {
 
             // Save CV entity
             CandidateCV cv = new CandidateCV();
-            cv.setPosition(position); // Có thể null cho CANDIDATE
+            cv.setPosition(position);
             cv.setDriveFileId(driveFileInfo.getFileId());
             cv.setDriveFileUrl(driveFileInfo.getWebViewLink());
-            // cvPath để null (deprecated)
 
             cv.setCvStatus(CVStatus.PENDING);
+            cv.setCreatedAt(LocalDateTime.now());
             cv.setUpdatedAt(LocalDateTime.now());
             cv.setBatchId(batchId);
             cv.setSourceType(sourceType);

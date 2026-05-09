@@ -5,6 +5,7 @@ import lombok.*;
 import org.example.recruitmentservice.models.enums.CVStatus;
 import org.example.recruitmentservice.models.enums.MatchStatus;
 import org.example.recruitmentservice.models.enums.RecruitmentStage;
+import org.example.recruitmentservice.models.enums.SourceType;
 
 import java.time.LocalDateTime;
 
@@ -28,6 +29,7 @@ public class CandidateCVResponse {
     private String aiAssessment;
     private String learningPath;
     private CVStatus status;
+    private SourceType sourceType;
     private RecruitmentStage recruitmentStage;
     private String errorMessage;
     private LocalDateTime failedAt;

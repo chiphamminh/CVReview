@@ -25,6 +25,12 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+import org.example.recruitmentservice.models.enums.RecruitmentStage;
+import org.example.recruitmentservice.models.enums.SourceType;
+import org.example.recruitmentservice.models.enums.EmailType;
+import org.example.recruitmentservice.dto.request.InterviewNotificationRequest;
+import java.time.format.DateTimeFormatter;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -34,6 +40,7 @@ public class CandidateCVService {
     private final CVAnalysisRepository cvAnalysisRepository;
     private final StorageService storageService;
     private final RestTemplate restTemplate;
+    private final NotificationService notificationService;
 
     @Value("${EMBEDDING_SERVICE_URL}")
     private String embeddingServiceUrl;
@@ -59,6 +66,7 @@ public class CandidateCVService {
                 .aiAssessment(cvAnalysis != null ? cvAnalysis.getAiAssessment() : null)
                 .learningPath(cvAnalysis != null ? cvAnalysis.getLearningPath() : null)
                 .status(cv.getCvStatus())
+                .sourceType(cv.getSourceType())
                 .errorMessage(cv.getErrorMessage())
                 .failedAt(cv.getFailedAt())
                 .retryCount(cv.getRetryCount())
@@ -156,5 +164,163 @@ public class CandidateCVService {
 
             candidateCVRepository.delete(cv);
         }
+    }
+
+    public ApiResponse<PageResponse<CandidateCVResponse>> filterCandidates(String keyword, Integer positionId,
+            RecruitmentStage stage, SourceType sourceType, CVStatus cvStatus, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by("updatedAt").descending());
+        Page<CandidateCV> cvPage = candidateCVRepository.filterCandidates(keyword, positionId, stage, sourceType, cvStatus, pageable);
+
+        Page<CandidateCVResponse> mappedPage = cvPage.map(cv -> {
+            CVAnalysis cvAnalysis = cv.getAnalysis();
+            return CandidateCVResponse.builder()
+                .cvId(cv.getId())
+                .positionId(cv.getPosition() != null ? cv.getPosition().getId() : 0)
+                .positionTitle(cv.getPosition() != null ? cv.getPosition().getTitle() : null)
+                .email(cv.getEmail())
+                .name(cv.getName())
+                .batchId(cv.getBatchId())
+                .driveFileUrl(cv.getDriveFileUrl())
+                .technicalScore(cvAnalysis != null ? cvAnalysis.getTechnicalScore() : null)
+                .experienceScore(cvAnalysis != null ? cvAnalysis.getExperienceScore() : null)
+                .overallStatus(cvAnalysis != null ? cvAnalysis.getOverallStatus() : null)
+                .aiAssessment(cvAnalysis != null ? cvAnalysis.getAiAssessment() : null)
+                .learningPath(cvAnalysis != null ? cvAnalysis.getLearningPath() : null)
+                .status(cv.getCvStatus())
+                .sourceType(cv.getSourceType())
+                .recruitmentStage(cv.getRecruitmentStage())
+                .errorMessage(cv.getErrorMessage())
+                .failedAt(cv.getFailedAt())
+                .retryCount(cv.getRetryCount())
+                .createdAt(cv.getCreatedAt())
+                .updatedAt(cv.getUpdatedAt())
+                .appliedDate(cv.getAppliedDate())
+                .interviewSchedule(cv.getInterviewSchedule())
+                .build();
+        });
+
+        return ApiResponse.<PageResponse<CandidateCVResponse>>builder()
+                .statusCode(ErrorCode.SUCCESS.getCode())
+                .message("Candidates filtered successfully")
+                .data(PageUtil.toPageResponse(mappedPage))
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
+    @Transactional
+    public void scheduleInterview(int cvId, LocalDateTime interviewDate, String customMessage) {
+        CandidateCV cv = candidateCVRepository.findByIdWithPosition(cvId)
+                .orElseThrow(() -> new CustomException(ErrorCode.CV_NOT_FOUND));
+
+        if (cv.getRecruitmentStage() != RecruitmentStage.APPLIED) {
+            throw new CustomException(ErrorCode.UNAUTHORIZED_ACTION, "Interview can only be scheduled for candidates in APPLIED stage.");
+        }
+
+        cv.setRecruitmentStage(RecruitmentStage.INTERVIEW_SCHEDULED);
+        cv.setInterviewSchedule(interviewDate);
+        cv.setUpdatedAt(LocalDateTime.now());
+        candidateCVRepository.save(cv);
+
+        InterviewNotificationRequest request = InterviewNotificationRequest.builder()
+                .appCvId(cv.getId())
+                .candidateId(cv.getCandidateId())
+                .candidateEmail(cv.getEmail())
+                .candidateName(cv.getName())
+                .positionId(cv.getPosition() != null ? cv.getPosition().getId() : null)
+                .positionName(cv.getPosition() != null ? cv.getPosition().getTitle() : "N/A")
+                .emailType(EmailType.INTERVIEW_INVITE.name())
+                .interviewDate(interviewDate.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")))
+                .customMessage(customMessage)
+                .build();
+
+        try {
+            notificationService.sendInterviewNotification(request);
+        } catch (Exception e) {
+            log.error("Failed to send interview invitation email for CV {}: {}", cvId, e.getMessage());
+            throw new CustomException(ErrorCode.EMAIL_SEND_FAILED, "Failed to send interview invitation email: " + e.getMessage());
+        }
+    }
+
+    @Transactional
+    public void rescheduleInterview(int cvId, LocalDateTime interviewDate, String customMessage) {
+        CandidateCV cv = candidateCVRepository.findByIdWithPosition(cvId)
+                .orElseThrow(() -> new CustomException(ErrorCode.CV_NOT_FOUND));
+
+        if (cv.getRecruitmentStage() != RecruitmentStage.INTERVIEW_SCHEDULED) {
+            throw new CustomException(ErrorCode.UNAUTHORIZED_ACTION, "Interview can only be rescheduled for candidates in INTERVIEW_SCHEDULED stage.");
+        }
+
+        cv.setInterviewSchedule(interviewDate);
+        cv.setUpdatedAt(LocalDateTime.now());
+        candidateCVRepository.save(cv);
+
+        InterviewNotificationRequest request = InterviewNotificationRequest.builder()
+                .appCvId(cv.getId())
+                .candidateId(cv.getCandidateId())
+                .candidateEmail(cv.getEmail())
+                .candidateName(cv.getName())
+                .positionId(cv.getPosition() != null ? cv.getPosition().getId() : null)
+                .positionName(cv.getPosition() != null ? cv.getPosition().getTitle() : "N/A")
+                .emailType(EmailType.INTERVIEW_INVITE.name())
+                .interviewDate(interviewDate.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")))
+                .customMessage(customMessage)
+                .build();
+
+        try {
+            notificationService.sendInterviewNotification(request);
+        } catch (Exception e) {
+            log.error("Failed to send interview reschedule email for CV {}: {}", cvId, e.getMessage());
+            throw new CustomException(ErrorCode.EMAIL_SEND_FAILED, "Failed to send interview reschedule email: " + e.getMessage());
+        }
+    }
+
+    @Transactional
+    public void sendOffer(int cvId, String benefit, String salary, String startDate, String offerExpirationDate, String additionalNote) {
+        CandidateCV cv = candidateCVRepository.findByIdWithPosition(cvId)
+                .orElseThrow(() -> new CustomException(ErrorCode.CV_NOT_FOUND));
+
+        if (cv.getRecruitmentStage() != RecruitmentStage.INTERVIEWED) {
+            throw new CustomException(ErrorCode.UNAUTHORIZED_ACTION, "Offer can only be sent to candidates in INTERVIEWED stage.");
+        }
+
+        cv.setRecruitmentStage(RecruitmentStage.OFFER);
+        cv.setUpdatedAt(LocalDateTime.now());
+        candidateCVRepository.save(cv);
+
+        InterviewNotificationRequest request = InterviewNotificationRequest.builder()
+                .appCvId(cv.getId())
+                .candidateId(cv.getCandidateId())
+                .candidateEmail(cv.getEmail())
+                .candidateName(cv.getName())
+                .positionId(cv.getPosition() != null ? cv.getPosition().getId() : null)
+                .positionName(cv.getPosition() != null ? cv.getPosition().getTitle() : "N/A")
+                .emailType(EmailType.OFFER_LETTER.name())
+                .benefit(benefit)
+                .salary(salary)
+                .startDate(startDate)
+                .offerExpirationDate(offerExpirationDate)
+                .additionalNote(additionalNote)
+                .build();
+
+        try {
+            notificationService.sendInterviewNotification(request);
+        } catch (Exception e) {
+            log.error("Failed to send offer email for CV {}: {}", cvId, e.getMessage());
+            throw new CustomException(ErrorCode.EMAIL_SEND_FAILED, "Failed to send offer email: " + e.getMessage());
+        }
+    }
+
+    @Transactional
+    public void updateStage(int cvId, RecruitmentStage newStage) {
+        CandidateCV cv = candidateCVRepository.findById(cvId)
+                .orElseThrow(() -> new CustomException(ErrorCode.CV_NOT_FOUND));
+
+        if (newStage != RecruitmentStage.ACCEPTED && newStage != RecruitmentStage.REJECTED) {
+            throw new CustomException(ErrorCode.UNAUTHORIZED_ACTION, "Only ACCEPTED or REJECTED stage updates are allowed manually.");
+        }
+
+        cv.setRecruitmentStage(newStage);
+        cv.setUpdatedAt(LocalDateTime.now());
+        candidateCVRepository.save(cv);
     }
 }
