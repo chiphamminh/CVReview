@@ -76,10 +76,12 @@ Columns: - id - job title - active (toggle switch) - minimum fit score
 (+ edit pen icon) - candidate apply - HR upload - open date - close
 date - action
 
-Actions: - View JD - View candidates apply - View HR uploads - Chat
-icon - Edit icon
+Filter: - seacrh title/seniority/skills - status (active/unactive)
 
-Edit actions: - Update Position - name - language - level - upload JD
+Actions: - View JD - View candidates apply - View HR uploads - Chat
+icon - Edit icon - Upload CV for specific position
+
+Edit actions: - Update Position - title - seniority - skills - upload JD
 file - Delete Position
 
 ------------------------------------------------------------------------
@@ -87,13 +89,15 @@ file - Delete Position
 ## 4.2 Candidate Page
 
 Columns: - id - name - job title - application date - type - stage -
-interview schedule - score - reason for match - action
+interview schedule - score - reason for match(ai-assessment) - action
 
-Filters: - search name - stage - type - position - date range
+Filters: - search name/email - stage - type - status - position - date range
 
-Actions by stage: - APPLIED - Schedule interview - Reject -
-INTERVIEW_SCHEDULED - Reschedule - INTERVIEWED - Offer - Reject -
-OFFER - Accept by candidate - Reject by candidate
+Actions by stage: 
+    - APPLIED - Schedule interview - Reject
+    - INTERVIEW_SCHEDULED - Reschedule 
+    - INTERVIEWED - Offer - Reject 
+    - OFFER - Accept by candidate - Reject by candidate
 
 Extra actions: - View CV - View analysis details
 

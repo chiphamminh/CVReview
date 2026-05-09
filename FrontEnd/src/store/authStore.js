@@ -6,25 +6,33 @@ const useAuthStore = create(
     (set) => ({
       user: null,
       token: null,
-      role: null, // 'HR' | 'CANDIDATE' | 'ADMIN'
+      refreshToken: null,
+      role: null,
       isAuthenticated: false,
 
-      login: (userData, token) => set({
+      login: (userData, accessToken, refreshToken) => set({
         user: userData,
-        token: token,
+        token: accessToken,
+        refreshToken,
         role: userData.role,
         isAuthenticated: true,
+      }),
+
+      setTokens: (accessToken, refreshToken) => set({
+        token: accessToken,
+        refreshToken,
       }),
 
       logout: () => set({
         user: null,
         token: null,
+        refreshToken: null,
         role: null,
         isAuthenticated: false,
       }),
     }),
     {
-      name: 'auth_store', // Tên lưu trong localStorage
+      name: 'auth_store',
     }
   )
 );

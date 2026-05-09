@@ -1,8 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AppRoutes from '@/routes/AppRoutes';
-import { ConfigProvider } from 'antd';
+import { ConfigProvider, App as AntdApp } from 'antd';
 
-// Khởi tạo QueryClient
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -15,12 +14,17 @@ const queryClient = new QueryClient({
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ConfigProvider theme={{
-        token: {
-          colorPrimary: '#1677ff',
-        },
-      }}>
-        <AppRoutes />
+      <ConfigProvider
+        theme={{
+          token: {
+            colorPrimary: '#1677ff',
+            borderRadius: 8,
+          },
+        }}
+      >
+        <AntdApp>
+          <AppRoutes />
+        </AntdApp>
       </ConfigProvider>
     </QueryClientProvider>
   );
