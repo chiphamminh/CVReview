@@ -175,14 +175,14 @@ if avg_score < min_score:
 
 ---
 
-### Phase 3 Sprint D — MinimumFitScore Sync & Guardrail *(Ưu tiên 4)*
+### Phase 3 Sprint D — MinimumFitScore Sync & Guardrail ✅
 > **Mục tiêu:** Score ngưỡng được HR điều chỉnh real-time, đồng bộ sang Chatbot, thay thế guard hardcode.
 
-- [ ] **D1.** Thêm `updateMinimumFitScore(positionId, score)` vào `PositionService` — update MySQL + fire-and-forget gọi chatbot.
-- [ ] **D2.** Expose `PATCH /positions/{id}/minimum-fit-score` trong `PositionController`.
-- [ ] **D3.** Expose `GET /internal/positions/scores` trong recruitment — trả về `Map<Integer, Double>` (positionId → score) để chatbot preload.
-- [ ] **D4.** Trong `chatbot-service`: tạo `position_score_cache.py` (singleton `dict`), expose `PATCH /internal/positions/{id}/minimum-fit-score`.
-- [ ] **D5.** Thêm startup hook trong chatbot: gọi `GET /internal/positions/scores` từ recruitment để preload cache sau khi service start.
-- [ ] **D6.** Refactor `finalize_application` trong `candidate_tools.py` + `reasoning.py`:
+- [x] **D1.** Thêm `updateMinimumFitScore(positionId, score)` vào `PositionService` — update MySQL + fire-and-forget gọi chatbot.
+- [x] **D2.** Expose `PATCH /positions/{id}/minimum-fit-score` trong `PositionController`.
+- [x] **D3.** Expose `GET /internal/chatbot/positions/scores` trong recruitment — trả về `Map<Integer, Double>` (positionId → score) để chatbot preload.
+- [x] **D4.** Trong `chatbot-service`: tạo `position_score_cache.py` (singleton `dict`), expose `PATCH /internal/positions/{id}/minimum-fit-score`.
+- [x] **D5.** Thêm startup hook trong chatbot: gọi `GET /internal/chatbot/positions/scores` từ recruitment để preload cache sau khi service start.
+- [x] **D6.** Refactor `finalize_application` trong `candidate_tools.py` + `reasoning.py`:
   - Xóa `_APPLY_ALLOWED_STATUSES`.
   - Guard mới: `avg_score = (technical_score + experience_score) / 2 >= position_score_cache.get(position_id, 70)`.

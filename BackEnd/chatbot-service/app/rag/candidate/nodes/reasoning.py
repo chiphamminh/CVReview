@@ -15,12 +15,10 @@ from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 
 from app.rag.candidate.state import CandidateChatState
 from app.rag.candidate.candidate_tools import CANDIDATE_TOOLS
+from app.services import position_score_cache
 from app.config import get_settings
 
 settings = get_settings()
-
-# MatchStatus values that allow application submission
-_APPLY_ALLOWED_STATUSES = {"EXCELLENT_MATCH", "GOOD_MATCH", "POTENTIAL"}
 
 
 def _extract_llm_text(content: Any) -> str:
@@ -133,7 +131,11 @@ async def _handle_finalize_application(
 
     # Auto-resolve position_id from scored_jobs when the LLM omits it.
     if not pos_id and state.get("scored_jobs"):
-        allowed = [j for j in state["scored_jobs"] if j.get("overallStatus") in _APPLY_ALLOWED_STATUSES]
+        allowed = [
+            j for j in state["scored_jobs"]
+            if (j.get("technicalScore", 0) + j.get("experienceScore", 0)) / 2
+               >= position_score_cache.get(j.get("positionId"), 70.0)
+        ]
         if allowed:
             best   = max(allowed, key=lambda j: j.get("technicalScore", 0) + j.get("experienceScore", 0))
             pos_id = best.get("positionId")
@@ -142,23 +144,24 @@ async def _handle_finalize_application(
 
     applied_position_name = ref_map.get(pos_id, f"position #{pos_id}")
 
-    # Guardrail: block POOR_FIT applications.
+    # Guardrail: block applications below minimumFitScore threshold.
     matched_job = next(
         (j for j in (state.get("scored_jobs") or []) if j.get("positionId") == pos_id),
         None,
     )
-    if matched_job and matched_job.get("overallStatus") not in _APPLY_ALLOWED_STATUSES:
-        skill_miss    = matched_job.get("skillMiss", [])
-        learning_path = matched_job.get("learningPath", "")
-        block_msg = (
-            f"Không thể nộp đơn vào vị trí **{applied_position_name}** "
-            f"(Trạng thái: **POOR_FIT**).\n\n"
-            f"**Kỹ năng còn thiếu:** {', '.join(skill_miss) if skill_miss else 'N/A'}\n\n"
-            f"**Lộ trình cải thiện:** {learning_path or 'Chưa có gợi ý cụ thể.'}"
-        )
-        messages.append(ToolMessage(content=block_msg, tool_call_id=call["id"]))
-        state["function_calls"].append({"name": "finalize_application", "arguments": tool_args, "result": block_msg})
-        return state, None
+    if matched_job:
+        avg_score = (matched_job.get("technicalScore", 0) + matched_job.get("experienceScore", 0)) / 2
+        min_score = position_score_cache.get(pos_id, 70.0)
+        if avg_score < min_score:
+            learning_path = matched_job.get("learningPath", "")
+            block_msg = (
+                f"Không thể nộp đơn vào vị trí **{applied_position_name}** "
+                f"(Điểm trung bình: **{avg_score:.1f}** < ngưỡng tối thiểu: **{min_score:.1f}**).\n\n"
+                f"**Lộ trình cải thiện:** {learning_path or 'Chưa có gợi ý cụ thể.'}"
+            )
+            messages.append(ToolMessage(content=block_msg, tool_call_id=call["id"]))
+            state["function_calls"].append({"name": "finalize_application", "arguments": tool_args, "result": block_msg})
+            return state, None
 
     try:
         # ISSUE-10: Normalize list→str for skill fields to prevent

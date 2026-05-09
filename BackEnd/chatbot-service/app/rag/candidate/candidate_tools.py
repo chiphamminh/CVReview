@@ -1,12 +1,6 @@
 from langchain_core.tools import tool
 from typing import List, Optional
 from app.services.recruitment_api import recruitment_api
-from app.config import get_settings
-
-settings = get_settings()
-
-# MatchStatus values that allow finalize_application to proceed
-_APPLY_ALLOWED_STATUSES = {"EXCELLENT_MATCH", "GOOD_MATCH", "POTENTIAL"}
 
 
 @tool
@@ -35,24 +29,18 @@ async def finalize_application(
     session_id: str,
 ) -> str:
     """
-    Nộp đơn ứng tuyển chính thức. CHỈ được gọi khi overallStatus không phải POOR_FIT.
+    Nộp đơn ứng tuyển chính thức. CHỈ được gọi khi điểm trung bình >= ngưỡng tối thiểu của vị trí.
 
     Args:
         position_id:      ID của vị trí ứng tuyển
-        overall_status:   MatchStatus (EXCELLENT_MATCH / GOOD_MATCH / POTENTIAL)
+        overall_status:   MatchStatus do AI sinh ra (chỉ để hiển thị)
         technical_score:  Điểm kỹ thuật (0-100)
         experience_score: Điểm kinh nghiệm (0-100)
-        ai_assessment:    Nhận xét AI tổng hợp (bao gồm skill match/miss và đánh giá chung)
-        learning_path:    Lộ trình học tập (None cho EXCELLENT_MATCH / GOOD_MATCH)
+        ai_assessment:    Nhận xét AI tổng hợp
+        learning_path:    Lộ trình học tập (None nếu không cần)
         candidate_id:     UUID của ứng viên (tự động inject từ session)
         session_id:       ID phiên hội thoại (tự động inject từ session)
     """
-    if overall_status not in _APPLY_ALLOWED_STATUSES:
-        return (
-            f"Không thể nộp đơn: trạng thái '{overall_status}' không đủ điều kiện. "
-            f"Cần đạt EXCELLENT_MATCH, GOOD_MATCH hoặc POTENTIAL để ứng tuyển."
-        )
-
     try:
         res = await recruitment_api.finalize_application(
             candidate_id=candidate_id,

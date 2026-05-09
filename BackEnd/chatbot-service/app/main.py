@@ -2,9 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from app.api.routes import health, candidate_chat, hr_chat
+from app.api.routes import health, candidate_chat, hr_chat, internal
 from app.services.embedding import embedding_service
 from app.services.qdrant import qdrant_service
+from app.services import position_score_cache
 from app.config import get_settings
 
 settings = get_settings()
@@ -42,6 +43,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f" Warning: Could not check collections: {e}")
     
+    # Preload minimumFitScore cache from recruitment-service
+    try:
+        import httpx
+        scores_url = f"{settings.RECRUITMENT_SERVICE_URL}/internal/chatbot/positions/scores"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                scores_url,
+                headers={"X-Internal-Service": settings.INTERNAL_SERVICE_SECRET},
+            )
+            if resp.status_code == 200:
+                position_score_cache.preload(resp.json())
+                print(f"Position score cache preloaded: {len(resp.json())} entries")
+            else:
+                print(f"Warning: Could not preload position scores (status {resp.status_code})")
+    except Exception as e:
+        print(f"Warning: Position score cache preload failed: {e}")
+
     print("Chatbot Service started successfully!")
     print(f"API docs: http://localhost:8085/docs")
     
@@ -91,6 +109,7 @@ app.add_middleware(
 app.include_router(candidate_chat.router, prefix="/chatbot")
 app.include_router(hr_chat.router, prefix="/chatbot")
 app.include_router(health.router, prefix="/chatbot")
+app.include_router(internal.router)
 
 
 # Root endpoint

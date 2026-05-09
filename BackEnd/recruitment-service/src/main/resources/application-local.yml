@@ -111,3 +111,4 @@ management:
 chatbot:
   internal-secret: ${CHATBOT_INTERNAL_SECRET:chatbot-service}
   from-email: ${MAIL_USERNAME}
+  service-url: ${CHATBOT_SERVICE_URL:http://localhost:8085}

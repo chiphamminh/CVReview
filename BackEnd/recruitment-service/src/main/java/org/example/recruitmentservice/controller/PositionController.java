@@ -40,6 +40,15 @@ public class PositionController {
     }
 
     @PreAuthorize("hasRole('HR')")
+    @PatchMapping("/{positionId}/minimum-fit-score")
+    public ResponseEntity<ApiResponse<Object>> updateMinimumFitScore(
+            @PathVariable int positionId,
+            @RequestParam double score) {
+        positionService.updateMinimumFitScore(positionId, score);
+        return ResponseEntity.ok(new ApiResponse<>(ErrorCode.SUCCESS.getCode(), "Updated successfully"));
+    }
+
+    @PreAuthorize("hasRole('HR')")
     @PatchMapping("/{positionId}/toggle-active")
     public ResponseEntity<ApiResponse<Object>> toggleActiveStatus(@PathVariable int positionId) {
         positionService.toggleActiveStatus(positionId);

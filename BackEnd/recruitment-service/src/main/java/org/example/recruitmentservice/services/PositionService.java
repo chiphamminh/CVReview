@@ -27,14 +27,20 @@ import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.MediaType;
+import org.springframework.http.HttpMethod;
 import org.example.recruitmentservice.utils.PositionUtils;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -51,6 +57,9 @@ public class PositionService {
 
     @Value("${EMBEDDING_SERVICE_URL}")
     private String embeddingServiceUrl;
+
+    @Value("${chatbot.service-url}")
+    private String chatbotServiceUrl;
 
     @Transactional
     public ApiResponse<PositionsResponse> createPosition(PositionsRequest positionsRequest,
@@ -167,7 +176,8 @@ public class PositionService {
                 response);
     }
 
-    public ApiResponse<PageResponse<PositionsResponse>> filterPositions(String keyword, Boolean isActive, int page, int size) {
+    public ApiResponse<PageResponse<PositionsResponse>> filterPositions(String keyword, Boolean isActive, int page,
+            int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
         Page<Positions> positionPage = positionRepository.filterPositions(keyword, isActive, pageable);
         Page<PositionsResponse> mappedPage = positionPage.map(this::toResponse);
@@ -194,6 +204,38 @@ public class PositionService {
             position.setClosedAt(null);
         }
         positionRepository.save(position);
+    }
+
+    @Transactional
+    public void updateMinimumFitScore(int positionId, double score) {
+        Positions position = positionRepository.findById(positionId);
+        if (position == null) {
+            throw new CustomException(ErrorCode.POSITION_NOT_FOUND);
+        }
+        position.setMinimumFitScore(score);
+        positionRepository.save(position);
+
+        // Fire-and-forget sync to chatbot-service — failure only logs, does not block
+        // HR response
+        String url = chatbotServiceUrl + "/internal/positions/" + positionId + "/minimum-fit-score";
+        CompletableFuture.runAsync(() -> {
+            try {
+                HttpHeaders headers = new HttpHeaders();
+                headers.set("X-Internal-Service", "chatbot-service");
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                HttpEntity<String> entity = new HttpEntity<>("{\"score\":" + score + "}", headers);
+                restTemplate.exchange(url, HttpMethod.PATCH, entity, Void.class);
+            } catch (Exception e) {
+                log.warn("[Position] Failed to sync minimumFitScore to chatbot for position {}: {}",
+                        positionId, e.getMessage());
+            }
+        });
+    }
+
+    public Map<Integer, Double> getAllMinimumFitScores() {
+        return positionRepository.findAll().stream()
+                .filter(p -> p.getMinimumFitScore() != null)
+                .collect(Collectors.toMap(Positions::getId, Positions::getMinimumFitScore));
     }
 
     public ApiResponse<PositionsResponse> getJdText(int positionId) {

@@ -16,10 +16,12 @@ import org.example.recruitmentservice.services.ChatSessionService;
 import org.example.recruitmentservice.services.ChatbotInternalService;
 import org.example.recruitmentservice.services.FinalizeApplicationService;
 import org.example.recruitmentservice.services.NotificationService;
+import org.example.recruitmentservice.services.PositionService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -43,6 +45,7 @@ public class ChatbotInternalController {
     private final ChatbotInternalService chatbotInternalService;
     private final FinalizeApplicationService finalizeApplicationService;
     private final NotificationService notificationService;
+    private final PositionService positionService;
 
     // -------------------------------------------------------
     // Session Management
@@ -201,6 +204,13 @@ public class ChatbotInternalController {
         notificationService.sendInterviewNotification(request);
         
         return new ApiResponse<>(ErrorCode.SUCCESS.getCode(), "Email sent successfully");
+    }
+
+    /** GET /internal/chatbot/positions/scores — Trả về map positionId → minimumFitScore để chatbot preload cache khi khởi động. */
+    @GetMapping("/positions/scores")
+    public Map<Integer, Double> getPositionScores(HttpServletRequest request) {
+        validateInternalRequest(request);
+        return positionService.getAllMinimumFitScores();
     }
 
     // -------------------------------------------------------
