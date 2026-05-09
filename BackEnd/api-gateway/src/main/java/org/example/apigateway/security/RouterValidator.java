@@ -17,6 +17,7 @@ public class RouterValidator {
     private static final List<String> openEndpoints = List.of(
             "/auth/login",
             "/auth/register",
+            "/auth/refresh-token",
             "/actuator/health",
             "/actuator/info",
             "/chatbot/health",

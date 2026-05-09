@@ -27,6 +27,8 @@ public class PositionsResponse {
     private JDStatus status;
     private String batchId;
     private Integer totalCVs;
+    private Long internalCount;
+    private Long externalCount;
     private LocalDateTime openedAt;
     private LocalDateTime closedAt;
     private LocalDateTime createdAt;

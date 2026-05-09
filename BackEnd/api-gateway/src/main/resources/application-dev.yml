@@ -26,7 +26,7 @@ spring:
               uri: http://recruitment-service:8082
               predicates:
                 - Path=/positions/**,/cv/**,/upload/**,/analysis/**,/tracking/**,/chunking/**
-                - Method=GET,POST,PUT,DELETE
+                - Method=GET,POST,PUT,PATCH,DELETE
               filters: []
   http:
     codecs:

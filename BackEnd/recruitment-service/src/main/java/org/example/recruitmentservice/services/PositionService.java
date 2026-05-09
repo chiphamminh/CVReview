@@ -31,6 +31,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.MediaType;
 import org.springframework.http.HttpMethod;
+import org.example.recruitmentservice.models.enums.SourceType;
 import org.example.recruitmentservice.utils.PositionUtils;
 
 import java.time.LocalDateTime;
@@ -99,6 +100,7 @@ public class PositionService {
         position.setDriveFileUrl(driveFileInfo.getWebViewLink());
         position.setBatchId(batchId);
         position.setStatus(JDStatus.PENDING);
+        position.setOpenedAt(LocalDateTime.now());
         position.setCreatedAt(LocalDateTime.now());
         position.setUpdatedAt(LocalDateTime.now());
 
@@ -326,10 +328,13 @@ public class PositionService {
     }
 
     private PositionsResponse toResponse(Positions position) {
-        int totalCVs = candidateCVRepository.countByPositionId(position.getId());
+        int positionId = position.getId();
+        int totalCVs = candidateCVRepository.countByPositionId(positionId);
+        long internalCount = candidateCVRepository.countByPositionIdAndSourceType(positionId, SourceType.INTERNAL);
+        long externalCount = candidateCVRepository.countByPositionIdAndSourceType(positionId, SourceType.EXTERNAL);
 
         return PositionsResponse.builder()
-                .id(position.getId())
+                .id(positionId)
                 .hrId(position.getHrId())
                 .title(position.getTitle())
                 .seniority(position.getSeniority())
@@ -337,6 +342,8 @@ public class PositionService {
                 .minimumFitScore(position.getMinimumFitScore())
                 .driveFileUrl(position.getDriveFileUrl())
                 .totalCVs(totalCVs)
+                .internalCount(internalCount)
+                .externalCount(externalCount)
                 .isActive(position.isActive())
                 .openedAt(position.getOpenedAt())
                 .closedAt(position.getClosedAt())

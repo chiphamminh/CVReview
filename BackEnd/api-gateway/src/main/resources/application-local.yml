@@ -31,7 +31,7 @@ spring:
               uri: http://localhost:8082
               predicates:
                 - Path=/positions/**,/cv/**,/upload/**,/analysis/**,/tracking/**,/chunking/**,/admin/analytics/**,/admin/cvs/**,/internal/chatbot/**,/api/chatbot/**
-                - Method=GET,POST,PUT,DELETE
+                - Method=GET,POST,PUT,PATCH,DELETE
               filters:
                 - name: CircuitBreaker
                   args:
