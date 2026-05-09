@@ -88,12 +88,18 @@ const LoginForm = ({ onSuccess }) => {
       setLoading(true);
       try {
         const res = await authApi.login(values.phone, values.password);
+        if (!res?.data) {
+          message.error(res?.message || 'Invalid phone number or password.');
+          return;
+        }
         const { accessToken, refreshToken, account } = res.data;
         login(account, accessToken, refreshToken);
         message.success(`Welcome back, ${account.name}!`);
         onSuccess(account.role);
       } catch (err) {
-        message.error(err.response?.data?.message || 'Invalid phone number or password.');
+        message.error(
+          err.response?.data?.message || err.message || 'Login failed. Please try again.'
+        );
       } finally {
         setLoading(false);
       }

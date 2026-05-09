@@ -60,3 +60,56 @@ body {
 .social-btn:hover {
   background: #f5f5f5 !important;
 }
+
+/* ─── JD Markdown Viewer ──────────────────────────────────────── */
+.jd-markdown-body {
+  font-size: 14px;
+  line-height: 1.75;
+  color: #262626;
+}
+
+.jd-markdown-body h1,
+.jd-markdown-body h2,
+.jd-markdown-body h3 {
+  margin-top: 20px;
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: #141414;
+}
+
+.jd-markdown-body h1 { font-size: 20px; }
+.jd-markdown-body h2 { font-size: 17px; }
+.jd-markdown-body h3 { font-size: 15px; }
+
+.jd-markdown-body p {
+  margin-bottom: 12px;
+}
+
+.jd-markdown-body ul,
+.jd-markdown-body ol {
+  padding-left: 22px;
+  margin-bottom: 12px;
+}
+
+.jd-markdown-body li {
+  margin-bottom: 4px;
+}
+
+.jd-markdown-body strong {
+  font-weight: 600;
+  color: #141414;
+}
+
+.jd-markdown-body hr {
+  border: none;
+  border-top: 1px solid #f0f0f0;
+  margin: 16px 0;
+}
+
+.jd-markdown-body code {
+  background: #f5f5f5;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+}

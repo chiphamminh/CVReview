@@ -2,7 +2,7 @@ import axiosClient from './axiosClient';
 
 export const authApi = {
   login: (phone, password) =>
-    axiosClient.post('/auth/login', { Phone: phone, password }),
+    axiosClient.post('/auth/login', { phone, password }),
 
   logout: () =>
     axiosClient.post('/auth/logout'),

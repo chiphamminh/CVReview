@@ -1,22 +1,38 @@
-import React, { useState, useEffect } from 'react';
-import { Modal, Upload, Button, Progress, Typography, Space, Card, Row, Col } from 'antd';
-import { InboxOutlined, CheckCircleOutlined, CloseCircleOutlined, SyncOutlined, FileOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useRef } from 'react';
+import { Modal, Upload, Button, Progress, Typography, Space, Card, Row, Col, App } from 'antd';
+import {
+  InboxOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  SyncOutlined,
+  FileOutlined,
+  ClockCircleOutlined,
+} from '@ant-design/icons';
+import { fetchEventSource } from '@microsoft/fetch-event-source';
+import useAuthStore from '@/store/authStore';
+import { uploadApi } from '@/api/upload.api';
 
 const { Dragger } = Upload;
 const { Text, Title } = Typography;
 
-const UploadCVModal = ({ open, onCancel, positionName }) => {
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+
+const UploadCVModal = ({ open, onCancel, positionId, positionName }) => {
+  const { message } = App.useApp();
   const [fileList, setFileList] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
-  
-  // Progress state simulating SSE
   const [progress, setProgress] = useState(0);
   const [processedCount, setProcessedCount] = useState(0);
   const [successCount, setSuccessCount] = useState(0);
   const [failCount, setFailCount] = useState(0);
+  const sseAbortRef = useRef(null);
 
-  // Timer reference
-  const [timerId, setTimerId] = useState(null);
+  const stopSSE = () => {
+    if (sseAbortRef.current) {
+      sseAbortRef.current.abort();
+      sseAbortRef.current = null;
+    }
+  };
 
   useEffect(() => {
     if (!open) {
@@ -26,110 +42,148 @@ const UploadCVModal = ({ open, onCancel, positionName }) => {
       setProcessedCount(0);
       setSuccessCount(0);
       setFailCount(0);
-      if (timerId) clearInterval(timerId);
+      stopSSE();
     }
   }, [open]);
 
-  const handleUpload = () => {
-    if (fileList.length === 0) return;
+  useEffect(() => () => stopSSE(), []);
+
+  const connectSSE = (batchId, total) => {
+    const controller = new AbortController();
+    sseAbortRef.current = controller;
+    const token = useAuthStore.getState().token;
+
+    fetchEventSource(`${BASE_URL}/tracking/${batchId}/stream`, {
+      method: 'GET',
+      headers: {
+        Authorization: token ? `Bearer ${token}` : '',
+        Accept: 'text/event-stream',
+      },
+      signal: controller.signal,
+      openWhenHidden: true,
+
+      onmessage: (event) => {
+        if (event.event === 'batch-completed') {
+          setProgress(100);
+          setIsUploading(false);
+          stopSSE();
+          return;
+        }
+
+        try {
+          const status = JSON.parse(event.data);
+          const processed = status.processed ?? 0;
+          setProcessedCount(processed);
+          setSuccessCount(status.success ?? 0);
+          setFailCount(status.failed ?? 0);
+          setProgress(total > 0 ? Math.round((processed / total) * 100) : 0);
+
+          if (status.status === 'COMPLETED') {
+            setProgress(100);
+            setIsUploading(false);
+            stopSSE();
+          }
+        } catch {
+          // bỏ qua parse error
+        }
+      },
+
+      onerror: (err) => {
+        if (err?.name === 'AbortError') return;
+        setIsUploading(false);
+        throw err; // dừng retry
+      },
+    });
+  };
+
+  const handleUpload = async () => {
+    if (fileList.length === 0 || !positionId) return;
     setIsUploading(true);
 
-    const totalFiles = fileList.length;
-    let currentProcessed = 0;
-    let currentSuccess = 0;
-    let currentFail = 0;
-
-    const interval = setInterval(() => {
-      currentProcessed += 1;
-      
-      // Randomly fail ~10% of files
-      if (Math.random() > 0.9) {
-        currentFail += 1;
-      } else {
-        currentSuccess += 1;
-      }
-
-      const currentProgress = Math.floor((currentProcessed / totalFiles) * 100);
-      
-      setProcessedCount(currentProcessed);
-      setSuccessCount(currentSuccess);
-      setFailCount(currentFail);
-      setProgress(currentProgress);
-
-      if (currentProcessed >= totalFiles) {
-        clearInterval(interval);
-        setIsUploading(false);
-      }
-    }, 1500); // 1.5 seconds per file
-    
-    setTimerId(interval);
+    try {
+      const res = await uploadApi.hrUploadCVs(positionId, fileList);
+      const batchId = res.data?.batchId;
+      if (!batchId) throw new Error('No batchId returned from server');
+      connectSSE(batchId, fileList.length);
+    } catch (err) {
+      message.error(err.response?.data?.message || 'Upload failed. Please try again.');
+      setIsUploading(false);
+    }
   };
 
   const uploadProps = {
-    onRemove: (file) => {
-      const index = fileList.indexOf(file);
-      const newFileList = fileList.slice();
-      newFileList.splice(index, 1);
-      setFileList(newFileList);
-    },
+    onRemove: (file) => setFileList((prev) => prev.filter((f) => f !== file)),
     beforeUpload: (file) => {
-      setFileList(prev => [...prev, file]);
+      setFileList((prev) => [...prev, file]);
       return false;
     },
     fileList,
     multiple: true,
+    accept: '.pdf,.doc,.docx',
   };
 
   const totalCV = fileList.length;
   const pendingCV = totalCV - processedCount;
+  const isDone = progress === 100;
 
   return (
     <Modal
       title={`Upload CVs for ${positionName || 'Position'}`}
       open={open}
-      onCancel={() => {
-        if (!isUploading) onCancel();
-      }}
+      onCancel={() => { if (!isUploading) onCancel(); }}
       maskClosable={!isUploading}
       closable={!isUploading}
       footer={[
         <Button key="cancel" onClick={onCancel} disabled={isUploading}>
-          {progress === 100 ? 'Close' : 'Cancel'}
+          {isDone ? 'Close' : 'Cancel'}
         </Button>,
-        <Button 
-          key="submit" 
-          type="primary" 
-          onClick={handleUpload} 
-          disabled={fileList.length === 0 || isUploading || progress === 100}
+        <Button
+          key="submit"
+          type="primary"
+          onClick={handleUpload}
+          disabled={fileList.length === 0 || isUploading || isDone}
           loading={isUploading}
         >
           Start Processing
-        </Button>
+        </Button>,
       ]}
       width={600}
     >
-      {!isUploading && progress === 0 ? (
+      {!isUploading && !isDone ? (
         <Dragger {...uploadProps} style={{ marginTop: 16 }}>
           <p className="ant-upload-drag-icon">
             <InboxOutlined />
           </p>
-          <p className="ant-upload-text">Click or drag multiple CVs to this area to upload</p>
-          <p className="ant-upload-hint">Support bulk upload. The system will process each CV automatically.</p>
+          <p className="ant-upload-text">Click or drag multiple CVs to upload</p>
+          <p className="ant-upload-hint">
+            Supports PDF, DOC, DOCX. The system will process each CV automatically.
+          </p>
         </Dragger>
       ) : (
-        <Card title={
-          <Space>
-            {isUploading ? <SyncOutlined spin style={{ color: '#1677ff' }} /> : <CheckCircleOutlined style={{ color: '#52c41a' }} />}
-            <span>{isUploading ? "Connecting to SSE... Extracting & Analyzing Data" : "Processing Complete"}</span>
-          </Space>
-        } style={{ marginTop: 16, borderColor: '#1677ff' }}>
-          
+        <Card
+          title={
+            <Space>
+              {isUploading ? (
+                <SyncOutlined spin style={{ color: '#1677ff' }} />
+              ) : (
+                <CheckCircleOutlined style={{ color: '#52c41a' }} />
+              )}
+              <span>{isUploading ? 'Processing CVs...' : 'Processing Complete'}</span>
+            </Space>
+          }
+          style={{ marginTop: 16, borderColor: '#1677ff' }}
+        >
           <div style={{ marginBottom: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
               <Text strong>Overall Progress</Text>
               <Text strong>{progress}%</Text>
             </div>
-            <Progress percent={progress} showInfo={false} status={progress === 100 ? "success" : "active"} strokeColor={{ '0%': '#108ee9', '100%': '#87d068' }} />
+            <Progress
+              percent={progress}
+              showInfo={false}
+              status={isDone ? 'success' : 'active'}
+              strokeColor={{ '0%': '#108ee9', '100%': '#87d068' }}
+            />
           </div>
 
           <Row gutter={[16, 16]}>
@@ -149,7 +203,7 @@ const UploadCVModal = ({ open, onCancel, positionName }) => {
                 <Space>
                   <ClockCircleOutlined style={{ fontSize: 20, color: '#faad14' }} />
                   <div>
-                    <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>Pending CV</Text>
+                    <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>Pending</Text>
                     <Title level={4} style={{ margin: 0 }}>{pendingCV}</Title>
                   </div>
                 </Space>
@@ -160,7 +214,7 @@ const UploadCVModal = ({ open, onCancel, positionName }) => {
                 <Space>
                   <CheckCircleOutlined style={{ fontSize: 20, color: '#52c41a' }} />
                   <div>
-                    <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>Success CV</Text>
+                    <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>Success</Text>
                     <Title level={4} style={{ margin: 0 }}>{successCount}</Title>
                   </div>
                 </Space>
@@ -171,7 +225,7 @@ const UploadCVModal = ({ open, onCancel, positionName }) => {
                 <Space>
                   <CloseCircleOutlined style={{ fontSize: 20, color: '#f5222d' }} />
                   <div>
-                    <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>Fail CV</Text>
+                    <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>Failed</Text>
                     <Title level={4} style={{ margin: 0 }}>{failCount}</Title>
                   </div>
                 </Space>

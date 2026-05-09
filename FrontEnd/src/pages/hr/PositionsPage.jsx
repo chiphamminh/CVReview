@@ -1,7 +1,16 @@
-import React, { useState } from 'react';
-import { Button, Space, Switch, InputNumber, Typography, Tooltip, message, Tag, Input, Select, Row, Col } from 'antd';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  Button, Space, Switch, InputNumber, Typography, Tooltip,
+  Tag, Input, Select, Row, Col, Drawer, App, Modal,
+} from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { PlusOutlined, FileTextOutlined, RobotOutlined, EditOutlined, DeleteOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';
+import {
+  PlusOutlined, FileTextOutlined, RobotOutlined,
+  EditOutlined, DeleteOutlined, SearchOutlined, UploadOutlined,
+  LinkOutlined, SyncOutlined, CheckCircleOutlined, ExclamationCircleOutlined,
+} from '@ant-design/icons';
+import { fetchEventSource } from '@microsoft/fetch-event-source';
+import ReactMarkdown from 'react-markdown';
 import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
 
@@ -10,137 +19,334 @@ import LoadingSkeleton from '@/components/common/LoadingSkeleton';
 import DeleteWarningPopup from '@/components/modals/DeleteWarningPopup';
 import PositionFormModal from '@/components/modals/PositionFormModal';
 import UploadCVModal from '@/components/modals/UploadCVModal';
-import { fetchPositions, updatePositionScore, togglePositionActive } from '@/api/mockData';
+import { positionApi } from '@/api/position.api';
+import useAuthStore from '@/store/authStore';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
 
+const PAGE_SIZE = 10;
+
 const PositionsPage = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { message, notification } = App.useApp();
+  const jdSseControllerRef = useRef(null);
+
+  // Cleanup SSE khi unmount
+  useEffect(() => {
+    return () => {
+      if (jdSseControllerRef.current) jdSseControllerRef.current.abort();
+    };
+  }, []);
 
   const [deleteVisible, setDeleteVisible] = useState(false);
   const [formVisible, setFormVisible] = useState(false);
   const [uploadCvVisible, setUploadCvVisible] = useState(false);
+  const [jdDrawer, setJdDrawer] = useState({ visible: false, title: '', text: '', driveUrl: '' });
   const [selectedPos, setSelectedPos] = useState(null);
 
-  // Filters
-  const [searchText, setSearchText] = useState('');
-  const [statusFilter, setStatusFilter] = useState(null); // 'all', 'active', 'closed'
+  // Filter state
+  const [searchInput, setSearchInput] = useState('');
+  const [keyword, setKeyword] = useState('');
+  const [statusFilter, setStatusFilter] = useState(null);
+  const [page, setPage] = useState(0);
 
-  const { data: positions, isLoading } = useQuery({
-    queryKey: ['positions'],
-    queryFn: fetchPositions,
+  // Debounce keyword
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setKeyword(searchInput);
+      setPage(0);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  const isActive = statusFilter === 'active' ? true : statusFilter === 'closed' ? false : undefined;
+
+  const { data: positionsData, isLoading } = useQuery({
+    queryKey: ['positions', { keyword, isActive, page }],
+    queryFn: () => positionApi.filter({ keyword: keyword || undefined, isActive, page, size: PAGE_SIZE }),
+  });
+
+  const positions = positionsData?.data?.content ?? [];
+  const totalElements = positionsData?.data?.totalElements ?? 0;
+
+  // ── Mutations ──────────────────────────────────────────────────────────────
+
+  const createMutation = useMutation({
+    mutationFn: (fd) => positionApi.create(fd),
+    onSuccess: (res) => {
+      const { batchId, title } = res.data ?? {};
+      setFormVisible(false);
+      trackJDProcessing(batchId, title);
+    },
+    onError: (err) => message.error(err.response?.data?.message || 'Failed to create position'),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, formData }) => positionApi.update(id, formData),
+    onSuccess: () => {
+      message.success('Position updated!');
+      queryClient.invalidateQueries({ queryKey: ['positions'] });
+      setFormVisible(false);
+    },
+    onError: (err) => message.error(err.response?.data?.message || 'Failed to update position'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (ids) => positionApi.deleteMany(ids),
+    onSuccess: () => {
+      message.success('Position deleted!');
+      queryClient.invalidateQueries({ queryKey: ['positions'] });
+      setDeleteVisible(false);
+    },
+    onError: (err) =>
+      message.error(err.response?.data?.message || 'Cannot delete — position has linked candidates'),
   });
 
   const updateScoreMutation = useMutation({
-    mutationFn: ({ id, score }) => updatePositionScore(id, score),
+    mutationFn: ({ id, score }) => positionApi.updateMinScore(id, score),
     onSuccess: () => {
-      message.success('Minimum Score updated successfully!');
+      message.success('Minimum score updated!');
       queryClient.invalidateQueries({ queryKey: ['positions'] });
     },
+    onError: (err) => message.error(err.response?.data?.message || 'Failed to update score'),
   });
 
   const toggleActiveMutation = useMutation({
-    mutationFn: ({ id, isActive }) => togglePositionActive(id, isActive),
-    onSuccess: () => {
-      message.success('Position status updated!');
+    mutationFn: ({ id }) => positionApi.toggleActive(id),
+    onSuccess: (_, { wasActive }) => {
+      queryClient.invalidateQueries({ queryKey: ['positions'] });
+      if (wasActive) {
+        message.success('Position closed — hidden from candidates.');
+      } else {
+        message.success('Position activated — visible to candidates.');
+      }
+    },
+    onError: (err) => message.error(err.response?.data?.message || 'Failed to update status'),
+  });
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
+
+  const trackJDProcessing = useCallback(
+    (batchId, positionTitle) => {
+      if (!batchId) {
+        // Không có batchId thì vẫn thông báo tạo thành công và refresh
+        message.success('Position created successfully!');
+        queryClient.invalidateQueries({ queryKey: ['positions'] });
+        return;
+      }
+
+      const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+      const token = useAuthStore.getState().token;
+      const key = `jd-${batchId}`;
+
+      notification.open({
+        key,
+        message: 'Processing Job Description',
+        description: `Parsing and embedding JD for "${positionTitle}"...`,
+        icon: <SyncOutlined spin style={{ color: '#1677ff' }} />,
+        duration: 0,
+      });
+
+      if (jdSseControllerRef.current) jdSseControllerRef.current.abort();
+      const controller = new AbortController();
+      jdSseControllerRef.current = controller;
+
+      fetchEventSource(`${BASE_URL}/tracking/${batchId}/stream`, {
+        method: 'GET',
+        headers: {
+          Authorization: token ? `Bearer ${token}` : '',
+          Accept: 'text/event-stream',
+        },
+        signal: controller.signal,
+        openWhenHidden: true,
+
+        onmessage: (event) => {
+          if (event.event === 'batch-completed') {
+            notification.open({
+              key,
+              message: 'JD Ready',
+              description: `"${positionTitle}" has been processed and is ready for candidate matching.`,
+              icon: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
+              duration: 5,
+            });
+            queryClient.invalidateQueries({ queryKey: ['positions'] });
+            controller.abort();
+            return;
+          }
+
+          try {
+            const status = JSON.parse(event.data);
+            if (status.status === 'COMPLETED') {
+              notification.open({
+                key,
+                message: 'JD Ready',
+                description: `"${positionTitle}" has been processed and is ready for candidate matching.`,
+                icon: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
+                duration: 5,
+              });
+              queryClient.invalidateQueries({ queryKey: ['positions'] });
+              controller.abort();
+            }
+          } catch {
+            // ignore parse errors
+          }
+        },
+
+        onerror: (err) => {
+          if (err?.name === 'AbortError') return;
+          notification.open({
+            key,
+            message: 'JD Processing Failed',
+            description: `Failed to process JD for "${positionTitle}". Please check and retry.`,
+            icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
+            duration: 6,
+          });
+          throw err;
+        },
+      });
+
       queryClient.invalidateQueries({ queryKey: ['positions'] });
     },
-  });
+    [notification, message, queryClient, jdSseControllerRef]
+  );
 
-  const handleScoreChange = (value, record) => {
-    if (value && value !== record.minFitScore) {
-      updateScoreMutation.mutate({ id: record.id, score: value });
+  const handleToggleActive = useCallback(
+    (currentlyActive, record) => {
+      if (currentlyActive) {
+        Modal.confirm({
+          title: 'Close this position?',
+          content: `"${record.title}" will be hidden from candidates and no new applications will be accepted.`,
+          okText: 'Close Position',
+          okButtonProps: { danger: true },
+          cancelText: 'Cancel',
+          onOk: () => toggleActiveMutation.mutate({ id: record.id, wasActive: true }),
+        });
+      } else {
+        toggleActiveMutation.mutate({ id: record.id, wasActive: false });
+      }
+    },
+    [toggleActiveMutation]
+  );
+
+  const handleCreateOrEdit = useCallback(
+    (values) => {
+      const fd = new FormData();
+      fd.append('title', values.title);
+      fd.append('seniority', values.seniority);
+      (values.skills ?? []).forEach((s) => fd.append('skills', s));
+      if (!selectedPos && values.file?.[0]?.originFileObj) {
+        fd.append('file', values.file[0].originFileObj);
+      }
+      if (selectedPos) {
+        updateMutation.mutate({ id: selectedPos.id, formData: fd });
+      } else {
+        createMutation.mutate(fd);
+      }
+    },
+    [selectedPos, createMutation, updateMutation]
+  );
+
+  const handleViewJD = useCallback(async (record) => {
+    try {
+      const res = await positionApi.getJDText(record.id);
+      setJdDrawer({
+        visible: true,
+        title: record.title,
+        text: res.data?.jdText || 'No JD content available.',
+        driveUrl: record.driveFileUrl || '',
+      });
+    } catch {
+      message.error('Failed to load JD content');
     }
-  };
+  }, [message]);
 
-  const handleToggleActive = (checked, record) => {
-    toggleActiveMutation.mutate({ id: record.id, isActive: checked });
-  };
+  const handleScoreBlurOrEnter = useCallback(
+    (value, record) => {
+      const num = parseFloat(value);
+      if (!isNaN(num) && num !== record.minimumFitScore) {
+        updateScoreMutation.mutate({ id: record.id, score: num });
+      }
+    },
+    [updateScoreMutation]
+  );
 
-  const handleCreateOrEdit = (values) => {
-    // API call should be here
-    message.success(selectedPos ? 'Position updated!' : 'Position created!');
-    setFormVisible(false);
-  };
+  const navigateToCandidates = useCallback(
+    (positionId, sourceType) => {
+      navigate(`/hr/candidates?positionId=${positionId}&sourceType=${sourceType}`);
+    },
+    [navigate]
+  );
 
-  const navigateToCandidates = (positionId, type) => {
-    navigate(`/hr/candidates?positionId=${positionId}&type=${type}`);
-  };
-
-  // Áp dụng Filter
-  const filteredData = positions?.filter(item => {
-    const matchName = item.name.toLowerCase().includes(searchText.toLowerCase());
-    let matchStatus = true;
-    if (statusFilter === 'active') matchStatus = item.isActive === true;
-    if (statusFilter === 'closed') matchStatus = item.isActive === false;
-    return matchName && matchStatus;
-  });
+  // ── Table Columns ──────────────────────────────────────────────────────────
 
   const columns = [
     {
       title: 'Job Title',
-      dataIndex: 'name',
-      key: 'name',
+      dataIndex: 'title',
+      key: 'title',
       render: (text, record) => (
         <div>
           <div style={{ fontWeight: 500 }}>{text}</div>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            {record.level} • {record.language}
+            {record.seniority}
+            {record.skills?.length ? ` • ${record.skills.slice(0, 3).join(', ')}` : ''}
           </Text>
         </div>
-      )
+      ),
     },
     {
       title: 'Status',
       dataIndex: 'isActive',
       key: 'isActive',
-      render: (isActive, record) => (
-        <Switch 
-          checked={isActive} 
-          checkedChildren="Active" 
-          unCheckedChildren="Closed" 
-          onChange={(checked) => handleToggleActive(checked, record)}
+      width: 110,
+      render: (active, record) => (
+        <Switch
+          checked={active}
+          checkedChildren="Active"
+          unCheckedChildren="Closed"
+          onChange={() => handleToggleActive(active, record)}
           loading={toggleActiveMutation.isPending && toggleActiveMutation.variables?.id === record.id}
         />
       ),
     },
     {
       title: 'Min Fit Score',
-      dataIndex: 'minFitScore',
-      key: 'minFitScore',
+      dataIndex: 'minimumFitScore',
+      key: 'minimumFitScore',
+      width: 120,
       render: (score, record) => (
-        <Space>
-          <InputNumber
-            min={0}
-            max={100}
-            defaultValue={score}
-            onBlur={(e) => handleScoreChange(parseInt(e.target.value), record)}
-            onPressEnter={(e) => handleScoreChange(parseInt(e.target.value), record)}
-            style={{ width: 60 }}
-          />
-        </Space>
+        <InputNumber
+          key={`${record.id}-${score}`}
+          min={0}
+          max={100}
+          defaultValue={score ?? 70}
+          onBlur={(e) => handleScoreBlurOrEnter(e.target.value, record)}
+          onPressEnter={(e) => handleScoreBlurOrEnter(e.target.value, record)}
+          style={{ width: 70 }}
+        />
       ),
     },
     {
       title: 'Candidates',
       key: 'candidates',
+      width: 130,
       render: (_, record) => (
-        <Space direction="vertical" size="small">
-          <Tag 
-            color="geekblue" 
-            style={{ cursor: 'pointer', margin: 0, width: '100%' }}
+        <Space direction="vertical" size={4}>
+          <Tag
+            color="geekblue"
+            style={{ cursor: 'pointer', margin: 0, width: '100%', textAlign: 'center' }}
             onClick={() => navigateToCandidates(record.id, 'INTERNAL')}
           >
-            Internal: {record.internalCount}
+            HR Upload: {record.internalCount ?? 0}
           </Tag>
-          <Tag 
-            color="green" 
-            style={{ cursor: 'pointer', margin: 0, width: '100%' }}
+          <Tag
+            color="green"
+            style={{ cursor: 'pointer', margin: 0, width: '100%', textAlign: 'center' }}
             onClick={() => navigateToCandidates(record.id, 'EXTERNAL')}
           >
-            External: {record.externalCount}
+            Applied: {record.externalCount ?? 0}
           </Tag>
         </Space>
       ),
@@ -149,70 +355,102 @@ const PositionsPage = () => {
       title: 'Opened At',
       dataIndex: 'openedAt',
       key: 'openedAt',
-      render: (date) => date ? dayjs(date).format('DD/MM/YYYY') : '-',
+      width: 110,
+      render: (date) => (date ? dayjs(date).format('DD/MM/YYYY') : '-'),
     },
     {
       title: 'Closed At',
       dataIndex: 'closedAt',
       key: 'closedAt',
-      render: (date) => date ? dayjs(date).format('DD/MM/YYYY') : <Text type="secondary">-</Text>,
+      width: 110,
+      render: (date) =>
+        date ? dayjs(date).format('DD/MM/YYYY') : <Text type="secondary">-</Text>,
     },
     {
       title: 'Actions',
       key: 'action',
+      width: 180,
       render: (_, record) => (
         <Space size="small">
           <Tooltip title="Upload CVs for this Position">
-            <Button type="text" icon={<UploadOutlined />} style={{ color: '#fa8c16' }} onClick={() => { setSelectedPos(record); setUploadCvVisible(true); }} />
+            <Button
+              type="text"
+              icon={<UploadOutlined />}
+              style={{ color: '#fa8c16' }}
+              onClick={() => { setSelectedPos(record); setUploadCvVisible(true); }}
+            />
           </Tooltip>
           <Tooltip title="View JD">
-            <Button type="text" icon={<FileTextOutlined />} onClick={() => console.log('View JD')} />
+            <Button
+              type="text"
+              icon={<FileTextOutlined />}
+              onClick={() => handleViewJD(record)}
+            />
           </Tooltip>
           <Tooltip title="Chat with AI for this Position">
-            <Button type="text" icon={<RobotOutlined />} style={{ color: '#52c41a' }} onClick={() => navigate(`/hr/chatbot/${record.id}`)} />
+            <Button
+              type="text"
+              icon={<RobotOutlined />}
+              style={{ color: '#52c41a' }}
+              onClick={() => navigate(`/hr/chatbot/${record.id}`)}
+            />
           </Tooltip>
           <Tooltip title="Edit Position">
-            <Button type="text" icon={<EditOutlined />} onClick={() => { setSelectedPos(record); setFormVisible(true); }} />
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => { setSelectedPos(record); setFormVisible(true); }}
+            />
           </Tooltip>
           <Tooltip title="Delete">
-            <Button type="text" danger icon={<DeleteOutlined />} onClick={() => { setSelectedPos(record); setDeleteVisible(true); }} />
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => { setSelectedPos(record); setDeleteVisible(true); }}
+            />
           </Tooltip>
         </Space>
       ),
     },
   ];
 
-  if (isLoading) {
+  if (isLoading && positions.length === 0) {
     return <LoadingSkeleton rows={10} />;
   }
 
   return (
     <div>
+      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <Title level={4} style={{ margin: 0 }}>Positions Management</Title>
-        <Space>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => { setSelectedPos(null); setFormVisible(true); }}>
-            Create Position
-          </Button>
-        </Space>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={() => { setSelectedPos(null); setFormVisible(true); }}
+        >
+          Create Position
+        </Button>
       </div>
 
+      {/* Filters */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={8}>
-          <Input 
-            placeholder="Search by job title..." 
-            prefix={<SearchOutlined />} 
-            value={searchText}
-            onChange={e => setSearchText(e.target.value)}
+        <Col span={10}>
+          <Input
+            placeholder="Search by title, seniority, or skills..."
+            prefix={<SearchOutlined />}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            allowClear
           />
         </Col>
         <Col span={6}>
-          <Select 
-            placeholder="Filter by Status" 
-            style={{ width: '100%' }} 
+          <Select
+            placeholder="Filter by Status"
+            style={{ width: '100%' }}
             allowClear
             value={statusFilter}
-            onChange={setStatusFilter}
+            onChange={(val) => { setStatusFilter(val); setPage(0); }}
           >
             <Option value="active">Active</Option>
             <Option value="closed">Closed</Option>
@@ -220,37 +458,81 @@ const PositionsPage = () => {
         </Col>
       </Row>
 
-      <AppTable 
-        columns={columns} 
-        dataSource={filteredData} 
-        loading={isLoading || updateScoreMutation.isPending || toggleActiveMutation.isPending} 
+      {/* Table */}
+      <AppTable
+        columns={columns}
+        dataSource={positions}
+        loading={isLoading}
+        rowKey="id"
+        pagination={{
+          current: page + 1,
+          pageSize: PAGE_SIZE,
+          total: totalElements,
+          onChange: (p) => setPage(p - 1),
+          showSizeChanger: false,
+          showTotal: (total) => `Total ${total} positions`,
+        }}
       />
 
-      <PositionFormModal 
+      {/* Create / Edit Modal */}
+      <PositionFormModal
         open={formVisible}
         onCancel={() => setFormVisible(false)}
         initialData={selectedPos}
         onSave={handleCreateOrEdit}
+        loading={createMutation.isPending || updateMutation.isPending}
       />
 
+      {/* Upload CV Modal */}
       <UploadCVModal
         open={uploadCvVisible}
         onCancel={() => setUploadCvVisible(false)}
-        positionName={selectedPos?.name}
+        positionId={selectedPos?.id}
+        positionName={selectedPos?.title}
       />
 
+      {/* Delete Confirmation */}
       <DeleteWarningPopup
         open={deleteVisible}
         onCancel={() => setDeleteVisible(false)}
-        onConfirm={() => {
-          message.success(`Position deleted: ${selectedPos?.name}`);
-          setDeleteVisible(false);
-        }}
+        onConfirm={() => deleteMutation.mutate([selectedPos?.id])}
         title="Delete Position"
-        content={`Are you sure you want to delete position "${selectedPos?.name}"? All applications related to this position will be lost.`}
+        content={`Are you sure you want to delete "${selectedPos?.title}"? This action cannot be undone.`}
         confirmText="Delete"
         cancelText="Cancel"
+        loading={deleteMutation.isPending}
       />
+
+      {/* JD Viewer Drawer */}
+      <Drawer
+        title={
+          <Space>
+            <span>Job Description — {jdDrawer.title}</span>
+            {jdDrawer.driveUrl && (
+              <Tooltip title="Open original file in Google Drive">
+                <Button
+                  type="link"
+                  icon={<LinkOutlined />}
+                  size="small"
+                  href={jdDrawer.driveUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ padding: 0 }}
+                >
+                  Open in Drive
+                </Button>
+              </Tooltip>
+            )}
+          </Space>
+        }
+        open={jdDrawer.visible}
+        onClose={() => setJdDrawer((prev) => ({ ...prev, visible: false }))}
+        width={600}
+      >
+        <div className="jd-markdown-body">
+          <ReactMarkdown>{jdDrawer.text}</ReactMarkdown>
+        </div>
+      </Drawer>
     </div>
   );
 };

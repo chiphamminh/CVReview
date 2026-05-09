@@ -46,6 +46,11 @@ axiosClient.interceptors.response.use(
     const originalRequest = error.config;
 
     if (error.response?.status === 401 && !originalRequest._retry) {
+      // Don't attempt token refresh for auth endpoints — propagate the error directly
+      if (originalRequest.url?.includes('/auth/')) {
+        return Promise.reject(error);
+      }
+
       // Nếu đang refresh, enqueue request hiện tại để retry sau
       if (isRefreshing) {
         return new Promise((resolve, reject) => {

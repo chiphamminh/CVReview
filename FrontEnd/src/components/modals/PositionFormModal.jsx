@@ -1,20 +1,28 @@
 import React, { useEffect } from 'react';
-import { Modal, Form, Input, Select, Upload, Button, message } from 'antd';
+import { Modal, Form, Input, Select, Upload, Button } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
 
 const { Dragger } = Upload;
-const { Option } = Select;
 
-const PositionFormModal = ({ open, onCancel, onSave, initialData }) => {
+const SENIORITY_OPTIONS = ['Intern', 'Fresher', 'Junior', 'Middle', 'Senior', 'Lead', 'Manager'];
+
+const SKILL_PRESETS = [
+  'Java', 'Spring Boot', 'Python', 'FastAPI', 'React', 'Vue', 'Angular',
+  'NodeJS', 'Go', 'C#', '.NET', 'TypeScript', 'Docker', 'Kubernetes',
+  'AWS', 'GCP', 'Azure', 'MySQL', 'PostgreSQL', 'MongoDB', 'Redis',
+];
+
+const PositionFormModal = ({ open, onCancel, onSave, initialData, loading }) => {
   const [form] = Form.useForm();
+  const isEdit = !!initialData;
 
   useEffect(() => {
     if (open) {
       if (initialData) {
         form.setFieldsValue({
-          name: initialData.name,
-          language: initialData.language,
-          level: initialData.level,
+          title: initialData.title,
+          seniority: initialData.seniority,
+          skills: initialData.skills ?? [],
         });
       } else {
         form.resetFields();
@@ -22,39 +30,36 @@ const PositionFormModal = ({ open, onCancel, onSave, initialData }) => {
     }
   }, [open, initialData, form]);
 
-  const handleFinish = (values) => {
-    // values will contain name, language, level, and possibly file
-    onSave(values);
-  };
-
   const uploadProps = {
     name: 'file',
     multiple: false,
     maxCount: 1,
-    beforeUpload: () => false, // manual upload
+    beforeUpload: () => false,
   };
 
   return (
     <Modal
-      title={initialData ? "Edit Position" : "Create New Position"}
+      title={isEdit ? 'Edit Position' : 'Create New Position'}
       open={open}
       onCancel={onCancel}
       footer={[
-        <Button key="cancel" onClick={onCancel}>Cancel</Button>,
-        <Button key="submit" type="primary" onClick={() => form.submit()}>
-          {initialData ? "Save Changes" : "Create"}
-        </Button>
+        <Button key="cancel" onClick={onCancel} disabled={loading}>
+          Cancel
+        </Button>,
+        <Button key="submit" type="primary" onClick={() => form.submit()} loading={loading}>
+          {isEdit ? 'Save Changes' : 'Create'}
+        </Button>,
       ]}
       destroyOnClose
     >
       <Form
         form={form}
         layout="vertical"
-        onFinish={handleFinish}
-        style={{ marginTop: '16px' }}
+        onFinish={onSave}
+        style={{ marginTop: 16 }}
       >
         <Form.Item
-          name="name"
+          name="title"
           label="Job Title"
           rules={[{ required: true, message: 'Please enter job title' }]}
         >
@@ -62,50 +67,48 @@ const PositionFormModal = ({ open, onCancel, onSave, initialData }) => {
         </Form.Item>
 
         <Form.Item
-          name="language"
-          label="Primary Language / Tech Stack"
-          rules={[{ required: true, message: 'Please select or enter language' }]}
+          name="seniority"
+          label="Seniority Level"
+          rules={[{ required: true, message: 'Please select seniority' }]}
         >
-          <Select placeholder="Select language">
-            <Option value="Java">Java</Option>
-            <Option value="Python">Python</Option>
-            <Option value="React">React</Option>
-            <Option value="NodeJS">NodeJS</Option>
-            <Option value="Go">Go</Option>
+          <Select placeholder="Select seniority">
+            {SENIORITY_OPTIONS.map((s) => (
+              <Select.Option key={s} value={s}>
+                {s}
+              </Select.Option>
+            ))}
           </Select>
         </Form.Item>
 
         <Form.Item
-          name="level"
-          label="Experience Level"
-          rules={[{ required: true, message: 'Please select level' }]}
+          name="skills"
+          label="Required Skills"
+          rules={[{ required: true, message: 'Please add at least one skill' }]}
         >
-          <Select placeholder="Select level">
-            <Option value="Junior">Junior</Option>
-            <Option value="Middle">Middle</Option>
-            <Option value="Senior">Senior</Option>
-            <Option value="Lead">Lead</Option>
-            <Option value="Manager">Manager</Option>
-          </Select>
+          <Select
+            mode="tags"
+            placeholder="Type or select skills (e.g. Java, React)"
+            options={SKILL_PRESETS.map((s) => ({ value: s, label: s }))}
+            tokenSeparators={[',']}
+          />
         </Form.Item>
 
-        <Form.Item
-          name="file"
-          label="Job Description File (JD)"
-          valuePropName="fileList"
-          getValueFromEvent={(e) => {
-            if (Array.isArray(e)) return e;
-            return e?.fileList;
-          }}
-          rules={[{ required: !initialData, message: 'Please upload JD file' }]}
-        >
-          <Dragger {...uploadProps}>
-            <p className="ant-upload-drag-icon">
-              <InboxOutlined />
-            </p>
-            <p className="ant-upload-text">Click or drag file to this area to upload</p>
-          </Dragger>
-        </Form.Item>
+        {!isEdit && (
+          <Form.Item
+            name="file"
+            label="Job Description File (JD)"
+            valuePropName="fileList"
+            getValueFromEvent={(e) => (Array.isArray(e) ? e : e?.fileList)}
+            rules={[{ required: true, message: 'Please upload JD file' }]}
+          >
+            <Dragger {...uploadProps}>
+              <p className="ant-upload-drag-icon">
+                <InboxOutlined />
+              </p>
+              <p className="ant-upload-text">Click or drag JD file here to upload</p>
+            </Dragger>
+          </Form.Item>
+        )}
       </Form>
     </Modal>
   );

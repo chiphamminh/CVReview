@@ -1,55 +1,91 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { fetchEventSource } from '@microsoft/fetch-event-source';
+import useAuthStore from '@/store/authStore';
 
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+
+/**
+ * Hook kết nối SSE với Authorization header (dùng fetch-event-source thay EventSource).
+ *
+ * @param {string|null} url  - Path tương đối (VD: /tracking/batch-123/stream). Truyền null để chưa kết nối.
+ * @param {object} options
+ * @param {function} options.onMessage   - Callback(data: object, eventName: string) mỗi khi nhận event
+ * @param {function} options.onError     - Callback(err) khi có lỗi không thể recover
+ * @param {function} options.onOpen      - Callback khi kết nối thành công
+ * @param {function} options.onClose     - Callback khi stream đóng bình thường
+ * @param {boolean}  options.enabled     - Bật/tắt kết nối (default true)
+ */
 const useSSE = (url, options = {}) => {
-  const { onMessage, onError, onOpen, enabled = true } = options;
+  const { onMessage, onError, onOpen, onClose, enabled = true } = options;
   const [isConnected, setIsConnected] = useState(false);
-  const eventSourceRef = useRef(null);
+  const abortControllerRef = useRef(null);
+
+  const closeConnection = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsConnected(false);
+  }, []);
 
   useEffect(() => {
     if (!enabled || !url) return;
 
-    // Khởi tạo EventSource
-    eventSourceRef.current = new EventSource(url);
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
-    eventSourceRef.current.onopen = (e) => {
-      setIsConnected(true);
-      if (onOpen) onOpen(e);
-    };
+    const token = useAuthStore.getState().token;
 
-    eventSourceRef.current.onmessage = (e) => {
-      // Cố gắng parse JSON nếu có thể
-      let data = e.data;
-      try {
-        data = JSON.parse(e.data);
-      } catch (err) {
-        // Data là chuỗi thuần
-      }
-      
-      if (onMessage) onMessage(data, e);
-    };
+    fetchEventSource(`${BASE_URL}${url}`, {
+      method: 'GET',
+      headers: {
+        Authorization: token ? `Bearer ${token}` : '',
+        Accept: 'text/event-stream',
+      },
+      signal: controller.signal,
 
-    eventSourceRef.current.onerror = (e) => {
-      setIsConnected(false);
-      if (onError) onError(e);
-      // Đóng kết nối nếu có lỗi nghiêm trọng hoặc tùy chỉnh logic reconnect
-      eventSourceRef.current.close();
-    };
+      onopen: async (response) => {
+        if (response.ok) {
+          setIsConnected(true);
+          if (onOpen) onOpen(response);
+        } else {
+          throw new Error(`SSE open failed: ${response.status}`);
+        }
+      },
 
-    // Cleanup khi component unmount hoặc url thay đổi
-    return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
+      onmessage: (event) => {
+        let data = event.data;
+        try {
+          data = JSON.parse(event.data);
+        } catch {
+          // data là chuỗi thuần, giữ nguyên
+        }
+        if (onMessage) onMessage(data, event.event);
+      },
+
+      onerror: (err) => {
+        // AbortError là đóng chủ động — không phải lỗi thực sự
+        if (err?.name === 'AbortError') return;
         setIsConnected(false);
-      }
-    };
-  }, [url, enabled]); // Chú ý: bỏ qua onMessage, onError để tránh re-render liên tục nếu là inline function
+        if (onError) onError(err);
+        // Trả về undefined để library không tự retry
+        throw err;
+      },
 
-  const closeConnection = () => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
+      onclose: () => {
+        setIsConnected(false);
+        if (onClose) onClose();
+      },
+
+      // Tắt auto-retry của library — logic reconnect do caller tự quyết
+      openWhenHidden: true,
+    });
+
+    return () => {
+      controller.abort();
       setIsConnected(false);
-    }
-  };
+    };
+  }, [url, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { isConnected, closeConnection };
 };
