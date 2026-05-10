@@ -120,6 +120,7 @@ public interface CandidateCVRepository extends JpaRepository<CandidateCV, Intege
        @Query("SELECT c FROM CandidateCV c LEFT JOIN FETCH c.position " +
                      "WHERE (:keyword IS NULL OR :keyword = '' OR LOWER(c.name) LIKE LOWER(CONCAT('%', :keyword, '%')) OR LOWER(c.email) LIKE LOWER(CONCAT('%', :keyword, '%'))) "
                      +
+                     "AND c.position IS NOT NULL " +
                      "AND (:positionId IS NULL OR c.position.id = :positionId) " +
                      "AND (:stage IS NULL OR c.recruitmentStage = :stage) " +
                      "AND (:sourceType IS NULL OR c.sourceType = :sourceType) " +

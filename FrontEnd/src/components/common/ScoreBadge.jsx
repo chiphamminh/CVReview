@@ -3,7 +3,7 @@ import { Badge } from 'antd';
 
 const ScoreBadge = ({ score }) => {
   if (score === null || score === undefined) {
-    return <span style={{ color: '#8c8c8c' }}>Chưa chấm</span>;
+    return <span style={{ color: '#8c8c8c' }}>None</span>;
   }
 
   let color = '#52c41a'; // Green

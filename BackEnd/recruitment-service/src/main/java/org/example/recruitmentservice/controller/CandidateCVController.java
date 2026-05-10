@@ -6,14 +6,15 @@ import org.example.commonlibrary.dto.response.ErrorCode;
 import org.example.commonlibrary.dto.response.PageResponse;
 import org.example.recruitmentservice.dto.request.RescheduleInterviewRequest;
 import org.example.recruitmentservice.dto.request.ScheduleInterviewRequest;
-import org.example.recruitmentservice.dto.request.SendOfferRequest;
 import org.example.recruitmentservice.dto.request.UpdateStageRequest;
 import org.example.recruitmentservice.dto.response.CandidateCVResponse;
 import org.example.recruitmentservice.models.enums.CVStatus;
 import org.example.recruitmentservice.services.CandidateCVService;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -39,7 +40,7 @@ public class CandidateCVController {
                 return candidateCVService.getAllCVsByPositionId(positionId, statuses, page, size);
         }
 
-        @PreAuthorize("hasRole('CANDIDATE')")
+        @PreAuthorize("hasAnyRole('HR', 'CANDIDATE')")
         @PutMapping("/{cvId}")
         public ResponseEntity<ApiResponse<Object>> updateCandidateCV(
                         @PathVariable int cvId,
@@ -98,12 +99,13 @@ public class CandidateCVController {
         }
 
         @PreAuthorize("hasRole('HR')")
-        @PostMapping("/{cvId}/send-offer")
+        @PostMapping(value = "/{cvId}/send-offer", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
         public ResponseEntity<ApiResponse<Object>> sendOffer(
                         @PathVariable int cvId,
-                        @RequestBody SendOfferRequest request) {
-                candidateCVService.sendOffer(cvId, request.getBenefit(), request.getSalary(),
-                                request.getStartDate(), request.getOfferExpirationDate(), request.getAdditionalNote());
+                        @RequestParam String startDate,
+                        @RequestParam String offerExpirationDate,
+                        @RequestPart(value = "attachments", required = false) List<MultipartFile> attachments) {
+                candidateCVService.sendOffer(cvId, startDate, offerExpirationDate, attachments);
                 return ResponseEntity.ok(new ApiResponse<>(
                                 ErrorCode.SUCCESS.getCode(),
                                 "Offer sent successfully"));

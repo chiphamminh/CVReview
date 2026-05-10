@@ -9,11 +9,17 @@ import org.example.commonlibrary.dto.response.ErrorCode;
 import org.example.recruitmentservice.dto.request.InterviewNotificationRequest;
 import org.example.recruitmentservice.models.enums.EmailType;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * Gửi email SMTP qua Spring Mail + Thymeleaf template.
@@ -31,14 +37,20 @@ public class NotificationService {
     @Value("${chatbot.from-email}")
     private String fromEmail;
 
+    /** Gọi từ chatbot-service và reschedule — không có file đính kèm. */
     public void sendInterviewNotification(InterviewNotificationRequest request) {
+        sendInterviewNotification(request, null);
+    }
+
+    /** Gọi từ HR portal sendOffer — có thể kèm file đính kèm. */
+    public void sendInterviewNotification(InterviewNotificationRequest request, List<MultipartFile> attachments) {
         EmailType emailType = parseEmailType(request.getEmailType());
 
         String subject = buildSubject(emailType, request.getPositionName());
         String templateName = resolveTemplateName(emailType);
         String htmlContent = buildHtmlContent(templateName, request);
 
-        sendHtmlEmail(request.getCandidateEmail(), subject, htmlContent);
+        sendHtmlEmail(request.getCandidateEmail(), subject, htmlContent, attachments);
         log.info("Email {} sent to {} for position {}",
                 emailType, request.getCandidateEmail(), request.getPositionName());
     }
@@ -79,7 +91,7 @@ public class NotificationService {
         return templateEngine.process(templateName, ctx);
     }
 
-    private void sendHtmlEmail(String to, String subject, String htmlContent) {
+    private void sendHtmlEmail(String to, String subject, String htmlContent, List<MultipartFile> attachments) {
         try {
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
@@ -87,8 +99,20 @@ public class NotificationService {
             helper.setTo(to);
             helper.setSubject(subject);
             helper.setText(htmlContent, true);
+
+            if (attachments != null) {
+                for (MultipartFile file : attachments) {
+                    if (!file.isEmpty()) {
+                        helper.addAttachment(
+                                Objects.requireNonNull(file.getOriginalFilename()),
+                                new ByteArrayResource(file.getBytes())
+                        );
+                    }
+                }
+            }
+
             mailSender.send(message);
-        } catch (MessagingException e) {
+        } catch (MessagingException | IOException e) {
             log.error("Failed to send email to {}: {}", to, e.getMessage());
             throw new CustomException(ErrorCode.EMAIL_SEND_FAILED);
         }

@@ -68,7 +68,7 @@ public class CandidateCV {
     @Enumerated(EnumType.STRING)
     private CVStatus cvStatus;
 
-    @Column
+    @Column(length = 50)
     @Enumerated(EnumType.STRING)
     private RecruitmentStage recruitmentStage = RecruitmentStage.APPLIED;
 

@@ -9,10 +9,10 @@ const ScheduleInterviewModal = ({ open, onCancel, onSave, candidateData }) => {
 
   useEffect(() => {
     if (open) {
-      if (candidateData?.interviewDate) {
+      if (candidateData?.interviewSchedule) {
         form.setFieldsValue({
-          date: dayjs(candidateData.interviewDate),
-          note: candidateData.interviewNote || ''
+          date: dayjs(candidateData.interviewSchedule),
+          note: ''
         });
       } else {
         form.resetFields();
@@ -22,14 +22,14 @@ const ScheduleInterviewModal = ({ open, onCancel, onSave, candidateData }) => {
 
   const handleFinish = (values) => {
     onSave({
-      date: values.date.toISOString(),
+      date: values.date.format('YYYY-MM-DDTHH:mm:ss'),
       note: values.note
     });
   };
 
   return (
     <Modal
-      title={candidateData?.interviewDate ? "Re-schedule Interview" : "Schedule Interview"}
+      title={candidateData?.interviewSchedule ? "Re-schedule Interview" : "Schedule Interview"}
       open={open}
       onCancel={onCancel}
       footer={[
@@ -55,7 +55,12 @@ const ScheduleInterviewModal = ({ open, onCancel, onSave, candidateData }) => {
           label="Interview Date & Time"
           rules={[{ required: true, message: 'Please select date and time' }]}
         >
-          <DatePicker showTime format="YYYY-MM-DD HH:mm" style={{ width: '100%' }} />
+          <DatePicker
+            showTime
+            format="YYYY-MM-DD HH:mm"
+            style={{ width: '100%' }}
+            disabledDate={(current) => current && current < dayjs().startOf('day')}
+          />
         </Form.Item>
 
         <Form.Item
