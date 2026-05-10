@@ -64,8 +64,10 @@ public class ExtractCVListener {
             }
 
             int totalTokens = chunks.stream().mapToInt(ChunkPayload::getTokensEstimate).sum();
-            String formattedTitle = PositionUtils.formatPositionTitle(cv.getPosition().getTitle(),
-                    cv.getPosition().getSeniority());
+            // Master CV (candidate upload) has no position — use empty string as title
+            String formattedTitle = cv.getPosition() != null
+                    ? PositionUtils.formatPositionTitle(cv.getPosition().getTitle(), cv.getPosition().getSeniority())
+                    : "";
 
             CVChunkedEvent chunkedEvent = new CVChunkedEvent(
                     cvId,

@@ -1,39 +1,54 @@
-import { Card, Descriptions, Button, Space, Typography, Tag, Upload } from 'antd';
-import { UploadOutlined, DeleteOutlined, EyeOutlined, EditOutlined } from '@ant-design/icons';
+import { Card, Descriptions, Button, Space, Typography, Tag, Spin } from 'antd';
+import { DeleteOutlined, EyeOutlined, EditOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
 
-const CVCard = ({ cvData, onUpdateClick, onDeleteClick, onEditClick }) => {
+const SUCCESSFUL_STATUSES = ['EXTRACTED', 'EMBEDDED'];
+
+const STAGE_CONFIG = {
+  APPLIED: { color: 'blue', label: 'Applied' },
+  INTERVIEW_SCHEDULED: { color: 'orange', label: 'Interview Scheduled' },
+  INTERVIEWED: { color: 'purple', label: 'Interviewed' },
+  OFFER: { color: 'cyan', label: 'Offer Sent' },
+  ACCEPTED: { color: 'green', label: 'Accepted' },
+  REJECTED: { color: 'red', label: 'Rejected' },
+};
+
+const CVCard = ({ cvData, loading, applications, onDeleteClick, onEditClick }) => {
+  if (loading) {
+    return (
+      <Card>
+        <div style={{ textAlign: 'center', padding: '40px 0' }}>
+          <Spin size="large" />
+        </div>
+      </Card>
+    );
+  }
+
   if (!cvData) {
     return (
       <Card>
         <div style={{ textAlign: 'center', padding: '40px 0' }}>
           <Title level={4}>No Master CV Found</Title>
-          <Text type="secondary">You haven't uploaded a Master CV yet.</Text>
-          <div style={{ marginTop: '20px' }}>
-            <Button type="primary" icon={<UploadOutlined />} onClick={onUpdateClick}>
-              Upload Master CV
-            </Button>
-          </div>
+          <Text type="secondary">You haven't uploaded a Master CV yet. Use the button below to upload.</Text>
         </div>
       </Card>
     );
   }
 
   return (
-    <Card 
+    <Card
       title={<Title level={4} style={{ margin: 0 }}>My Master CV</Title>}
       extra={
         <Space>
-          <Button icon={<EyeOutlined />} onClick={() => window.open(cvData.driveFileUrl, '_blank')}>
-            View CV
-          </Button>
+          {cvData.driveFileUrl && (
+            <Button icon={<EyeOutlined />} onClick={() => window.open(cvData.driveFileUrl, '_blank')}>
+              View CV
+            </Button>
+          )}
           <Button icon={<EditOutlined />} onClick={onEditClick}>
             Edit Info
-          </Button>
-          <Button type="primary" icon={<UploadOutlined />} onClick={onUpdateClick}>
-            Update CV
           </Button>
           <Button danger icon={<DeleteOutlined />} onClick={onDeleteClick}>
             Delete
@@ -48,25 +63,38 @@ const CVCard = ({ cvData, onUpdateClick, onDeleteClick, onEditClick }) => {
           {cvData.updatedAt ? dayjs(cvData.updatedAt).format('DD MMM YYYY, HH:mm') : 'N/A'}
         </Descriptions.Item>
         <Descriptions.Item label="Status">
-          <Tag color={cvData.cvStatus === 'PARSED' ? 'green' : 'orange'}>
-            {cvData.cvStatus}
+          <Tag color={SUCCESSFUL_STATUSES.includes(cvData.status) ? 'green' : 'orange'}>
+            {cvData.status}
           </Tag>
         </Descriptions.Item>
       </Descriptions>
-      
+
       <div style={{ marginTop: '24px' }}>
         <Title level={5}>Recent Applications</Title>
-        {cvData.applications && cvData.applications.length > 0 ? (
-          <ul>
-            {cvData.applications.map((app, idx) => (
-              <li key={idx} style={{ marginBottom: 8 }}>
-                <Text strong>{app.positionName}</Text> - <Tag>{app.stage}</Tag> 
-                <Text type="secondary"> (Applied: {dayjs(app.date).format('DD MMM YYYY')})</Text>
-              </li>
-            ))}
-          </ul>
+        {applications && applications.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {applications.map((app) => {
+              const cfg = STAGE_CONFIG[app.recruitmentStage] || { color: 'default', label: app.recruitmentStage };
+              return (
+                <div
+                  key={app.cvId}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: '#fafafa', borderRadius: 6, border: '1px solid #f0f0f0' }}
+                >
+                  <Text strong>{app.positionTitle || 'Unknown Position'}</Text>
+                  <Space size={8}>
+                    <Tag color={cfg.color} style={{ margin: 0 }}>{cfg.label}</Tag>
+                    {app.recruitmentStage === 'INTERVIEW_SCHEDULED' && app.interviewSchedule && (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {dayjs(app.interviewSchedule).format('DD MMM YYYY, HH:mm')}
+                      </Text>
+                    )}
+                  </Space>
+                </div>
+              );
+            })}
+          </div>
         ) : (
-          <Text type="secondary">No applications found with this CV.</Text>
+          <Text type="secondary">No active applications found.</Text>
         )}
       </div>
     </Card>

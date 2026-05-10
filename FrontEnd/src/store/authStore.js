@@ -9,6 +9,7 @@ const useAuthStore = create(
       refreshToken: null,
       role: null,
       isAuthenticated: false,
+      hasMasterCV: null, // null = unknown, true = has CV, false = no CV
 
       login: (userData, accessToken, refreshToken) => set({
         user: userData,
@@ -16,6 +17,7 @@ const useAuthStore = create(
         refreshToken,
         role: userData.role,
         isAuthenticated: true,
+        hasMasterCV: null, // reset on login, will be resolved lazily
       }),
 
       setTokens: (accessToken, refreshToken) => set({
@@ -23,12 +25,15 @@ const useAuthStore = create(
         refreshToken,
       }),
 
+      setHasMasterCV: (value) => set({ hasMasterCV: value }),
+
       logout: () => set({
         user: null,
         token: null,
         refreshToken: null,
         role: null,
         isAuthenticated: false,
+        hasMasterCV: null,
       }),
     }),
     {

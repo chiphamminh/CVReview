@@ -11,7 +11,7 @@ import java.util.function.Predicate;
 public class RouterValidator {
 
     /**
-     * Danh sách các endpoints KHÔNG cần JWT authentication
+     * Các endpoints khớp chính xác — không cần JWT.
      */
     @Getter
     private static final List<String> openEndpoints = List.of(
@@ -22,25 +22,26 @@ public class RouterValidator {
             "/actuator/info",
             "/chatbot/health",
             "/chatbot/health/ready",
-            "/chatbot/health/live"
+            "/chatbot/health/live",
+            "/positions"
     );
 
     /**
-     * Predicate để kiểm tra xem một request có cần authentication hay không
-     *
-     * @return true nếu endpoint cần JWT authentication, false nếu là open endpoint
+     * Các path prefix — bất kỳ path nào bắt đầu bằng các giá trị này đều không cần JWT.
+     * Dùng cho endpoints có dynamic segment (e.g. /positions/jd/{id}/text).
+     */
+    private static final List<String> openPrefixes = List.of(
+            "/positions/jd/"
+    );
+
+    /**
+     * Predicate kiểm tra request có cần authentication không.
+     * Trả về true nếu cần JWT, false nếu là open endpoint.
      */
     public Predicate<ServerHttpRequest> isSecured = request -> {
         String path = request.getURI().getPath();
-
-        // Kiểm tra xem path có chính xác bằng bất kỳ endpoint nào trong danh sách public hay không
-        boolean isOpenEndpoint = openEndpoints.contains(path);
-
-        if (isOpenEndpoint) {
-            return false;
-        }
-
-        // Tất cả các endpoint khác đều cần authentication
-        return true;
+        boolean isExactMatch = openEndpoints.contains(path);
+        boolean isPrefixMatch = openPrefixes.stream().anyMatch(path::startsWith);
+        return !isExactMatch && !isPrefixMatch;
     };
 }

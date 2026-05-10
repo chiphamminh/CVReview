@@ -2,15 +2,15 @@ import React from 'react';
 import { Modal, Button } from 'antd';
 import { ExclamationCircleOutlined } from '@ant-design/icons';
 
-const DeleteWarningPopup = ({ 
-  open, 
-  onCancel, 
-  onConfirm, 
-  title = "Xác nhận xóa", 
-  content = "Bạn có chắc chắn muốn thực hiện hành động này không? Hành động này không thể hoàn tác.",
+const DeleteWarningPopup = ({
+  open,
+  onCancel,
+  onConfirm,
+  title = "Confirm Deletion",
+  content = "Are you sure you want to perform this action? This action cannot be undone.",
   loading = false,
-  confirmText = "Xóa",
-  cancelText = "Hủy bỏ"
+  confirmText = "Delete",
+  cancelText = "Cancel"
 }) => {
   return (
     <Modal

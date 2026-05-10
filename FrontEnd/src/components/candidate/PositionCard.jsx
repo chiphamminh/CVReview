@@ -1,45 +1,104 @@
 import { useState } from 'react';
-import { Card, Button, Typography, Space, Tag, Badge, Modal, Divider } from 'antd';
-import { CalendarOutlined, FileTextOutlined, ArrowRightOutlined, CheckCircleOutlined, BookOutlined } from '@ant-design/icons';
+import { Card, Button, Typography, Space, Tag, Badge, Modal, Divider, Spin, Tooltip } from 'antd';
+import {
+  CalendarOutlined,
+  FileTextOutlined,
+  ArrowRightOutlined,
+  FilePdfOutlined,
+  RobotOutlined,
+  InfoCircleOutlined,
+} from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
 import useAuthStore from '@/store/authStore';
+import useUiStore from '@/store/uiStore';
 import LearningPathCard from '@/components/candidate/LearningPathCard';
+import { positionApi } from '@/api/position.api';
 
 const { Title, Text } = Typography;
 
-const getStatusColor = (status) => {
-  switch (status) {
-    case 'EXCELLENT_MATCH': return 'success';
-    case 'GOOD_MATCH': return 'processing';
-    case 'POTENTIAL': return 'warning';
-    case 'POOR_FIT': return 'error';
-    default: return 'default';
-  }
+const STAGE_CONFIG = {
+  APPLIED: { color: 'blue', label: 'Applied' },
+  INTERVIEW_SCHEDULED: { color: 'orange', label: 'Interview Scheduled' },
+  INTERVIEWED: { color: 'purple', label: 'Interviewed' },
+  OFFER: { color: 'cyan', label: 'Offer Sent' },
+  ACCEPTED: { color: 'green', label: 'Accepted' },
+  REJECTED: { color: 'red', label: 'Rejected' },
 };
 
-const formatStatusText = (status) => {
-  if (!status) return 'UNKNOWN';
-  return status.replace('_', ' ');
+const STAGE_HEX = {
+  APPLIED:             '#1677ff',
+  INTERVIEW_SCHEDULED: '#fa8c16',
+  INTERVIEWED:         '#531dab',
+  OFFER:               '#13c2c2',
+  ACCEPTED:            '#52c41a',
+  REJECTED:            '#f5222d',
 };
 
-const PositionCard = ({ position }) => {
+const MATCH_STATUS_COLOR = {
+  EXCELLENT_MATCH: 'success',
+  GOOD_MATCH: 'processing',
+  POTENTIAL: 'warning',
+  POOR_FIT: 'error',
+};
+
+const formatStatus = (s) => s?.replace(/_/g, ' ') ?? '';
+
+const PositionCard = ({ position, applicationData }) => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  const { cvAnalysis } = position;
-  
-  const [isLearningPathModalOpen, setIsLearningPathModalOpen] = useState(false);
+  const { hasMasterCV } = useAuthStore();
+  const { openChatbot } = useUiStore();
 
-  const handleApply = () => {
-    if (!user) {
-      navigate('/login');
-      return;
+  const [isLearningPathModalOpen, setIsLearningPathModalOpen] = useState(false);
+  const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
+  const [isJDModalOpen, setIsJDModalOpen] = useState(false);
+  const [jdText, setJdText] = useState(null);
+  const [jdLoading, setJdLoading] = useState(false);
+
+  const handleOpenJD = async () => {
+    setIsJDModalOpen(true);
+    if (jdText !== null) return;
+    setJdLoading(true);
+    try {
+      const res = await positionApi.getJDText(position.id);
+      setJdText(res.data?.jdText || '');
+    } catch {
+      setJdText('');
+    } finally {
+      setJdLoading(false);
     }
-    // Navigate to chatbot to finalize application
-    navigate(`/candidate/chatbot?positionId=${position.id}&action=apply`);
   };
 
   const renderAction = () => {
+    // Has applied — show stage-based button
+    if (applicationData) {
+      const stage = applicationData.recruitmentStage;
+      const cfg = STAGE_CONFIG[stage] || { color: 'default', label: stage };
+
+      if (stage === 'REJECTED') {
+        return (
+          <Button block size="large" style={{ borderColor: STAGE_HEX.REJECTED, color: STAGE_HEX.REJECTED, pointerEvents: 'none', cursor: 'default' }}>
+            Not Qualified
+          </Button>
+        );
+      }
+      if (stage === 'ACCEPTED') {
+        return (
+          <Button block size="large" style={{ borderColor: STAGE_HEX.ACCEPTED, color: STAGE_HEX.ACCEPTED, pointerEvents: 'none', cursor: 'default' }}>
+            Offer Accepted
+          </Button>
+        );
+      }
+      return (
+        <Button block size="large" style={{ borderColor: STAGE_HEX[stage], color: STAGE_HEX[stage], pointerEvents: 'none', cursor: 'default' }}>
+          {cfg.label}
+        </Button>
+      );
+    }
+
+    // Not logged in
     if (!user) {
       return (
         <Button type="primary" icon={<ArrowRightOutlined />} onClick={() => navigate('/login')} block size="large">
@@ -48,104 +107,199 @@ const PositionCard = ({ position }) => {
       );
     }
 
-    if (!cvAnalysis) {
+    // No CV
+    if (hasMasterCV === false) {
       return (
         <Button type="default" onClick={() => navigate('/candidate/cv')} block size="large">
-          Evaluate Fit (Upload CV)
+          Upload CV to Apply
         </Button>
       );
     }
 
-    if (cvAnalysis.isApplied) {
+    // Has CV → open chatbot
+    if (hasMasterCV === true) {
       return (
-        <Button type="primary" icon={<CheckCircleOutlined />} disabled block size="large" style={{ backgroundColor: '#52c41a', borderColor: '#52c41a' }}>
-          APPLIED
+        <Button type="primary" icon={<RobotOutlined />} onClick={openChatbot} block size="large">
+          Chat to Evaluate Fit
         </Button>
       );
     }
 
-    if (cvAnalysis.score >= 70) {
-      return (
-        <Button type="primary" icon={<ArrowRightOutlined />} onClick={handleApply} block size="large">
-          Apply Now
-        </Button>
-      );
-    }
-
-    // Score < 70
+    // hasMasterCV === null (unknown)
     return (
-      <>
-        <Button danger icon={<BookOutlined />} block size="large" onClick={() => setIsLearningPathModalOpen(true)}>
-          Learning Path
-        </Button>
-        <Modal
-          title="Suggested Learning Path"
-          open={isLearningPathModalOpen}
-          onCancel={() => setIsLearningPathModalOpen(false)}
-          footer={[
-            <Button key="close" onClick={() => setIsLearningPathModalOpen(false)}>
-              Close
-            </Button>
-          ]}
-          width={600}
-        >
-          <LearningPathCard 
-            score={cvAnalysis.score} 
-            missingSkills={cvAnalysis.missingSkills} 
-            learningPathText={cvAnalysis.learningPath} 
-          />
-        </Modal>
-      </>
+      <Button type="default" onClick={() => navigate('/candidate/cv')} block size="large">
+        Evaluate Fit (Upload CV)
+      </Button>
     );
   };
 
+  const skillTags = Array.isArray(position.skills) ? position.skills : [];
+  const hasAnalysis = applicationData?.overallStatus != null;
+  const score = applicationData
+    ? Math.round(((applicationData.technicalScore ?? 0) + (applicationData.experienceScore ?? 0)) / 2)
+    : null;
+
   return (
-    <Card 
-      hoverable 
+    <Card
+      hoverable
       style={{ borderRadius: 8, border: '1px solid #f0f0f0', height: '100%', display: 'flex', flexDirection: 'column' }}
       styles={{ body: { padding: '24px', display: 'flex', flexDirection: 'column', flex: 1 } }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-        <Title level={4} style={{ margin: 0, color: '#1677ff', lineHeight: 1.2 }}>{position.name}</Title>
-        {position.isHot && <Tag color="volcano" style={{ margin: 0 }}>HOT</Tag>}
+      {/* Header */}
+      <div style={{ marginBottom: 12 }}>
+        <Text type="secondary" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 }}>
+          {position.seniority}
+        </Text>
+        <Title level={4} style={{ margin: '4px 0 0', color: '#1677ff', lineHeight: 1.2 }}>
+          {position.title}
+        </Title>
       </div>
-      
-      <Space size={[0, 8]} wrap style={{ marginBottom: 16 }}>
-        <Tag color="blue">{position.level}</Tag>
-        <Tag color="cyan">{position.language}</Tag>
-      </Space>
 
-      <Text type="secondary" style={{ marginBottom: 16, display: 'block' }}>
-        <CalendarOutlined style={{ marginRight: 8 }} />
-        Posted: {dayjs(position.openDate).format('DD MMM YYYY')}
+      {/* Skills */}
+      {skillTags.length > 0 && (
+        <Space size={[4, 6]} wrap style={{ marginBottom: 16 }}>
+          {skillTags.map((skill) => (
+            <Tag key={skill} color="blue" style={{ margin: 0 }}>{skill}</Tag>
+          ))}
+        </Space>
+      )}
+
+      <Text type="secondary" style={{ marginBottom: 16, display: 'block', fontSize: 13 }}>
+        <CalendarOutlined style={{ marginRight: 6 }} />
+        Posted: {dayjs(position.openedAt).format('DD MMM YYYY')}
       </Text>
 
-      {cvAnalysis && (
-        <div style={{ padding: '12px', background: '#fafafa', borderRadius: 6, marginBottom: 16 }}>
-          <Space direction="vertical" size="small" style={{ width: '100%' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Text type="secondary" style={{ fontSize: 13 }}>Match Status</Text>
-              <Badge status={getStatusColor(cvAnalysis.overallStatus)} text={<Text strong>{formatStatusText(cvAnalysis.overallStatus)}</Text>} />
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Text type="secondary" style={{ fontSize: 13 }}>Score</Text>
-              <Text strong style={{ color: cvAnalysis.score >= 70 ? '#52c41a' : '#cf1322' }}>{cvAnalysis.score} / 100</Text>
-            </div>
-          </Space>
+      {/* Application analysis block */}
+      {applicationData && (
+        <div style={{ padding: '12px', background: '#fafafa', borderRadius: 6, marginBottom: 16, border: '1px solid #f0f0f0' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: hasAnalysis ? 8 : 0 }}>
+            <Tag color={STAGE_CONFIG[applicationData.recruitmentStage]?.color || 'default'} style={{ margin: 0 }}>
+              {STAGE_CONFIG[applicationData.recruitmentStage]?.label || applicationData.recruitmentStage}
+            </Tag>
+            {applicationData.recruitmentStage === 'INTERVIEW_SCHEDULED' && applicationData.interviewSchedule && (
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {dayjs(applicationData.interviewSchedule).format('DD MMM YYYY, HH:mm')}
+              </Text>
+            )}
+          </div>
+
+          {hasAnalysis && (
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text type="secondary" style={{ fontSize: 13 }}>Match</Text>
+                <Badge
+                  status={MATCH_STATUS_COLOR[applicationData.overallStatus] || 'default'}
+                  text={<Text strong style={{ fontSize: 12 }}>{formatStatus(applicationData.overallStatus)}</Text>}
+                />
+              </div>
+              {score !== null && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text type="secondary" style={{ fontSize: 13 }}>Score</Text>
+                  <Space size={4}>
+                    <Text strong style={{ color: score >= 70 ? '#52c41a' : '#cf1322' }}>{score} / 100</Text>
+                    {applicationData.aiAssessment && (
+                      <Tooltip title="View AI Analysis">
+                        <InfoCircleOutlined
+                          style={{ color: '#1677ff', cursor: 'pointer' }}
+                          onClick={() => setIsAnalysisModalOpen(true)}
+                        />
+                      </Tooltip>
+                    )}
+                  </Space>
+                </div>
+              )}
+            </Space>
+          )}
         </div>
       )}
 
-      {/* Spacer to push buttons to the bottom */}
-      <div style={{ flex: 1 }}></div>
-
+      <div style={{ flex: 1 }} />
       <Divider style={{ margin: '16px 0' }} />
 
-      <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {renderAction()}
-        <Button icon={<FileTextOutlined />} onClick={() => window.open(position.jdUrl, '_blank')} block>
+        <Button icon={<FileTextOutlined />} onClick={handleOpenJD} block>
           View Job Description
         </Button>
-      </Space>
+      </div>
+
+      {/* AI Analysis Modal */}
+      {applicationData?.aiAssessment && (
+        <Modal
+          title="AI Analysis"
+          open={isAnalysisModalOpen}
+          onCancel={() => setIsAnalysisModalOpen(false)}
+          footer={[<Button key="close" onClick={() => setIsAnalysisModalOpen(false)}>Close</Button>]}
+          width={600}
+        >
+          {/* Score summary */}
+          <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
+            {[
+              { label: 'Technical', value: applicationData.technicalScore },
+              { label: 'Experience', value: applicationData.experienceScore },
+              { label: 'Overall', value: score },
+            ].map(({ label, value }) => (
+              <div
+                key={label}
+                style={{ flex: 1, textAlign: 'center', padding: '12px 8px', background: '#fafafa', borderRadius: 8, border: '1px solid #f0f0f0' }}
+              >
+                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>{label}</Text>
+                <Text strong style={{ fontSize: 22, color: value != null && value >= 70 ? '#52c41a' : '#cf1322' }}>
+                  {value ?? '-'}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}> / 100</Text>
+              </div>
+            ))}
+          </div>
+
+          {score !== null && score < 70 ? (
+            <LearningPathCard
+              score={score}
+              missingSkills={[]}
+              learningPathText={applicationData.learningPath || applicationData.aiAssessment}
+            />
+          ) : (
+            <div className="jd-markdown-body">
+              <ReactMarkdown>{applicationData.aiAssessment}</ReactMarkdown>
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {/* Learning Path Modal (no application yet) */}
+      <Modal
+        title="Suggested Learning Path"
+        open={isLearningPathModalOpen}
+        onCancel={() => setIsLearningPathModalOpen(false)}
+        footer={[<Button key="close" onClick={() => setIsLearningPathModalOpen(false)}>Close</Button>]}
+        width={600}
+      >
+        <LearningPathCard score={0} missingSkills={[]} learningPathText="" />
+      </Modal>
+
+      {/* JD Modal */}
+      <Modal
+        title={`${position.seniority ? position.seniority + ' · ' : ''}${position.title}`}
+        open={isJDModalOpen}
+        onCancel={() => setIsJDModalOpen(false)}
+        footer={[
+          position.driveFileUrl && (
+            <Button key="pdf" icon={<FilePdfOutlined />} onClick={() => window.open(position.driveFileUrl, '_blank')}>
+              Open PDF
+            </Button>
+          ),
+          <Button key="close" type="primary" onClick={() => setIsJDModalOpen(false)}>Close</Button>,
+        ].filter(Boolean)}
+        width={720}
+      >
+        {jdLoading ? (
+          <div style={{ textAlign: 'center', padding: '40px' }}><Spin /></div>
+        ) : (
+          <div className="jd-markdown-body" style={{ maxHeight: '60vh', overflowY: 'auto', padding: '4px 0' }}>
+            <ReactMarkdown>{jdText || 'No job description content available.'}</ReactMarkdown>
+          </div>
+        )}
+      </Modal>
     </Card>
   );
 };

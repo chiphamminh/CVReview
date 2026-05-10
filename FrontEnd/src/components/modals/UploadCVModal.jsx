@@ -17,6 +17,12 @@ const { Text, Title } = Typography;
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
+const formatElapsed = (seconds) => {
+  const m = String(Math.floor(seconds / 60)).padStart(2, '0');
+  const s = String(seconds % 60).padStart(2, '0');
+  return `${m}:${s}`;
+};
+
 const UploadCVModal = ({ open, onCancel, positionId, positionName }) => {
   const { message } = App.useApp();
   const [fileList, setFileList] = useState([]);
@@ -25,13 +31,30 @@ const UploadCVModal = ({ open, onCancel, positionId, positionName }) => {
   const [processedCount, setProcessedCount] = useState(0);
   const [successCount, setSuccessCount] = useState(0);
   const [failCount, setFailCount] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const sseAbortRef = useRef(null);
+  const timerRef = useRef(null);
+  const startTimeRef = useRef(null);
 
   const stopSSE = () => {
     if (sseAbortRef.current) {
       sseAbortRef.current.abort();
       sseAbortRef.current = null;
     }
+  };
+
+  const stopTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const startTimer = () => {
+    startTimeRef.current = Date.now();
+    timerRef.current = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startTimeRef.current) / 1000));
+    }, 1000);
   };
 
   useEffect(() => {
@@ -42,16 +65,19 @@ const UploadCVModal = ({ open, onCancel, positionId, positionName }) => {
       setProcessedCount(0);
       setSuccessCount(0);
       setFailCount(0);
+      setElapsedSeconds(0);
       stopSSE();
+      stopTimer();
     }
   }, [open]);
 
-  useEffect(() => () => stopSSE(), []);
+  useEffect(() => () => { stopSSE(); stopTimer(); }, []);
 
   const connectSSE = (batchId, total) => {
     const controller = new AbortController();
     sseAbortRef.current = controller;
     const token = useAuthStore.getState().token;
+    startTimer();
 
     fetchEventSource(`${BASE_URL}/tracking/${batchId}/stream`, {
       method: 'GET',
@@ -67,6 +93,7 @@ const UploadCVModal = ({ open, onCancel, positionId, positionName }) => {
           setProgress(100);
           setIsUploading(false);
           stopSSE();
+          stopTimer();
           return;
         }
 
@@ -82,16 +109,18 @@ const UploadCVModal = ({ open, onCancel, positionId, positionName }) => {
             setProgress(100);
             setIsUploading(false);
             stopSSE();
+            stopTimer();
           }
         } catch {
-          // bỏ qua parse error
+          // ignore parse errors
         }
       },
 
       onerror: (err) => {
         if (err?.name === 'AbortError') return;
         setIsUploading(false);
-        throw err; // dừng retry
+        stopTimer();
+        throw err;
       },
     });
   };
@@ -187,7 +216,7 @@ const UploadCVModal = ({ open, onCancel, positionId, positionName }) => {
           </div>
 
           <Row gutter={[16, 16]}>
-            <Col span={12}>
+            <Col span={8}>
               <Card size="small" style={{ background: '#f5f5f5' }}>
                 <Space>
                   <FileOutlined style={{ fontSize: 20, color: '#1890ff' }} />
@@ -198,10 +227,23 @@ const UploadCVModal = ({ open, onCancel, positionId, positionName }) => {
                 </Space>
               </Card>
             </Col>
-            <Col span={12}>
+            <Col span={8}>
+              <Card size="small" style={{ background: '#f5f5f5' }}>
+                <Space>
+                  <ClockCircleOutlined style={{ fontSize: 20, color: '#1890ff' }} />
+                  <div>
+                    <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>Elapsed</Text>
+                    <Text strong style={{ fontFamily: 'monospace', fontSize: 16 }}>
+                      {formatElapsed(elapsedSeconds)}
+                    </Text>
+                  </div>
+                </Space>
+              </Card>
+            </Col>
+            <Col span={8}>
               <Card size="small" style={{ background: '#fffbe6' }}>
                 <Space>
-                  <ClockCircleOutlined style={{ fontSize: 20, color: '#faad14' }} />
+                  <SyncOutlined spin={isUploading} style={{ fontSize: 20, color: '#faad14' }} />
                   <div>
                     <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>Pending</Text>
                     <Title level={4} style={{ margin: 0 }}>{pendingCV}</Title>

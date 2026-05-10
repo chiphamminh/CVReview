@@ -29,7 +29,6 @@ public class PositionController {
         return ResponseEntity.ok(positionService.createPosition(positionsRequest, request));
     }
 
-    @PreAuthorize("hasAnyRole('HR', 'CANDIDATE')")
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<PositionsResponse>>> filterPositions(
             @RequestParam(required = false) String keyword,

@@ -1,120 +1,124 @@
-import { useState, useEffect } from 'react';
-import { Typography, message } from 'antd';
+import { useState, useEffect, useCallback } from 'react';
+import { Typography, Button, App } from 'antd';
+import { UploadOutlined } from '@ant-design/icons';
 import CVCard from '@/components/candidate/CVCard';
-import WarningUpdateCVModal from '@/components/modals/WarningUpdateCVModal';
-import UploadCVModal from '@/components/modals/UploadCVModal';
+import CandidateUploadCVModal from '@/components/modals/CandidateUploadCVModal';
 import UpdateCVModal from '@/components/modals/UpdateCVModal';
 import DeleteWarningPopup from '@/components/modals/DeleteWarningPopup';
 import useAuthStore from '@/store/authStore';
-import { fetchCandidates } from '@/api/mockData';
+import { candidateApi } from '@/api/candidate.api';
 
 const { Title, Paragraph } = Typography;
 
 const CVPage = () => {
-  const { user } = useAuthStore();
+  const { message } = App.useApp();
+  const { setHasMasterCV } = useAuthStore();
+
   const [cvData, setCvData] = useState(null);
+  const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
-  
-  const [isWarningModalOpen, setIsWarningModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [cvRes, appRes] = await Promise.allSettled([
+        candidateApi.getMyCV(),
+        candidateApi.getMyApplications(),
+      ]);
+
+      const cv = cvRes.status === 'fulfilled' ? (cvRes.value.data || null) : null;
+      setCvData(cv);
+      setHasMasterCV(!!cv);
+
+      if (appRes.status === 'fulfilled') {
+        setApplications(appRes.value.data || []);
+      }
+    } catch {
+      message.error('Failed to load CV data');
+    } finally {
+      setLoading(false);
+    }
+  }, [message, setHasMasterCV]);
 
   useEffect(() => {
-    // Mock fetch user's Master CV
-    const loadCV = async () => {
-      try {
-        const candidates = await fetchCandidates();
-        const masterCv = candidates.find(c => c.type === 'EXTERNAL' && !c.position_id);
-        
-        if (masterCv) {
-          masterCv.applications = [
-            { positionName: 'Senior Frontend Developer', stage: 'APPLIED', date: new Date().toISOString() }
-          ];
-        }
-        
-        setCvData(masterCv || null);
-      } catch (error) {
-        message.error('Failed to load CV');
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadCV();
-  }, [user]);
+    fetchData();
+  }, [fetchData]);
 
-  const handleUpdateClick = () => {
-    if (cvData) {
-      setIsWarningModalOpen(true);
-    } else {
-      setIsUploadModalOpen(true);
-    }
-  };
-
-  const handleDeleteConfirm = () => {
-    setCvData(null);
-    setIsDeleteModalOpen(false);
-    message.success('Master CV deleted successfully');
-  };
-
-  const handleWarningOk = () => {
-    setIsWarningModalOpen(false);
-    setIsUploadModalOpen(true);
-  };
-
-  const handleUploadModalCancel = () => {
+  const handleUploadSuccess = () => {
     setIsUploadModalOpen(false);
-    if (!cvData) {
-      message.success('New Master CV uploaded successfully.');
-      setCvData({
-        name: user?.name || 'Candidate',
-        email: user?.email || 'candidate@example.com',
-        updatedAt: new Date().toISOString(),
-        cvStatus: 'PARSED',
-        driveFileUrl: '#',
-        applications: []
-      });
+    fetchData();
+  };
+
+  const handleDeleteConfirm = async () => {
+    setIsDeleting(true);
+    try {
+      await candidateApi.deleteMany([cvData.cvId]);
+      setCvData(null);
+      setApplications([]);
+      setHasMasterCV(false);
+      setIsDeleteModalOpen(false);
+      message.success('Master CV deleted successfully');
+    } catch (err) {
+      message.error(err.response?.data?.message || 'Failed to delete CV');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
-  const handleEditSave = (values) => {
-    setCvData(prev => ({
-      ...prev,
-      name: values.name,
-      email: values.email
-    }));
-    setIsEditModalOpen(false);
-    message.success('CV Information updated successfully');
+  const handleEditSave = async (values) => {
+    setIsSaving(true);
+    try {
+      await candidateApi.updateInfo(cvData.cvId, { name: values.name, email: values.email });
+      setCvData((prev) => ({ ...prev, name: values.name, email: values.email }));
+      setIsEditModalOpen(false);
+      message.success('CV information updated successfully');
+    } catch (err) {
+      message.error(err.response?.data?.message || 'Failed to update CV');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
     <div>
-      <Title level={2}>My CV Management</Title>
-      <Paragraph type="secondary">
-        Manage your Master CV here. This CV will be used when you apply for positions via our AI Chatbot.
-      </Paragraph>
-      
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+        <div>
+          <Title level={2} style={{ margin: 0 }}>My CV Management</Title>
+          <Paragraph type="secondary" style={{ marginTop: 4 }}>
+            Manage your Master CV. This CV is used when you apply for positions via the AI Chatbot.
+          </Paragraph>
+        </div>
+        {!cvData && (
+          <Button
+            type="primary"
+            icon={<UploadOutlined />}
+            onClick={() => setIsUploadModalOpen(true)}
+          >
+            Upload CV
+          </Button>
+        )}
+      </div>
+
       <div style={{ marginTop: '24px' }}>
-        <CVCard 
-          cvData={cvData} 
-          onUpdateClick={handleUpdateClick} 
-          onDeleteClick={() => setIsDeleteModalOpen(true)} 
+        <CVCard
+          cvData={cvData}
+          loading={loading}
+          applications={applications}
+          onDeleteClick={() => setIsDeleteModalOpen(true)}
           onEditClick={() => setIsEditModalOpen(true)}
         />
       </div>
 
-      <WarningUpdateCVModal
-        open={isWarningModalOpen}
-        loading={false}
-        onOk={handleWarningOk}
-        onCancel={() => setIsWarningModalOpen(false)}
-      />
-
-      <UploadCVModal 
-        open={isUploadModalOpen} 
-        onCancel={handleUploadModalCancel} 
-        positionName="Master Profile"
+      <CandidateUploadCVModal
+        open={isUploadModalOpen}
+        onCancel={() => setIsUploadModalOpen(false)}
+        onSuccess={handleUploadSuccess}
+        isReupload={!!cvData}
       />
 
       <UpdateCVModal
@@ -123,14 +127,16 @@ const CVPage = () => {
         onCancel={() => setIsEditModalOpen(false)}
         onSave={handleEditSave}
         initialData={cvData}
+        loading={isSaving}
       />
 
       <DeleteWarningPopup
         open={isDeleteModalOpen}
         onCancel={() => setIsDeleteModalOpen(false)}
         onConfirm={handleDeleteConfirm}
+        loading={isDeleting}
         title="Delete Master CV"
-        content="Are you sure you want to delete your Master CV? You will not be able to apply to any new positions until you upload a new one. This action cannot be undone."
+        content="Are you sure you want to delete your Master CV? All active applications will be invalidated. This action cannot be undone."
       />
     </div>
   );

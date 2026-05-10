@@ -36,12 +36,12 @@ const HRLayout = ({ children }) => {
     {
       key: '/hr/positions',
       icon: <UnorderedListOutlined />,
-      label: 'Quản lý Vị trí',
+      label: 'Positions',
     },
     {
       key: '/hr/candidates',
       icon: <TeamOutlined />,
-      label: 'Quản lý Ứng viên',
+      label: 'Candidates',
     },
     {
       key: '/hr/chatbot',
@@ -55,12 +55,12 @@ const HRLayout = ({ children }) => {
       {
         key: 'profile',
         icon: <UserOutlined />,
-        label: 'Thông tin cá nhân',
+        label: 'Profile',
       },
       {
         key: 'logout',
         icon: <LogoutOutlined />,
-        label: 'Đăng xuất',
+        label: 'Logout',
         danger: true,
         onClick: handleLogout,
       },
@@ -79,7 +79,7 @@ const HRLayout = ({ children }) => {
           selectedKeys={[location.pathname]}
           onClick={({ key }) => navigate(key)}
           items={menuItems}
-          style={{ borderRight: 0 }}
+          style={{ borderRight: 0, fontSize: 16 }}
         />
       </Sider>
       <Layout>
@@ -91,7 +91,7 @@ const HRLayout = ({ children }) => {
             style={{ fontSize: '16px', width: 64, height: 64 }}
           />
           <div>
-            <Dropdown menu={userMenu} placement="bottomRight">
+            <Dropdown menu={userMenu} placement="bottomRight" align={{ offset: [0, -8] }}>
               <div style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: 8 }}>
                 <span style={{ fontWeight: 500 }}>{user?.name || 'HR Admin'}</span>
                 <Avatar icon={<UserOutlined />} style={{ backgroundColor: '#1677ff' }} />
@@ -99,7 +99,7 @@ const HRLayout = ({ children }) => {
             </Dropdown>
           </div>
         </Header>
-        <Content style={{ margin: '24px 16px', padding: 24, minHeight: 280, background: colorBgContainer, borderRadius: borderRadiusLG, overflow: 'auto' }}>
+        <Content style={{ margin: '16px 16px', padding: 24, minHeight: 280, background: colorBgContainer, borderRadius: borderRadiusLG, overflow: 'auto' }}>
           {children}
         </Content>
       </Layout>

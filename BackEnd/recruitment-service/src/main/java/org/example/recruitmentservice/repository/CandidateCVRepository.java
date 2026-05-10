@@ -86,8 +86,8 @@ public interface CandidateCVRepository extends JpaRepository<CandidateCV, Intege
 
        /**
         * Lấy các Application CVs ứng tuyển vào 1 position cụ thể
-        * (sourceType=CANDIDATE).
-        * Dùng trong HR chatbot mode CANDIDATE để lấy candidateIds rồi filter Qdrant.
+        * (sourceType=EXTERNAL).
+        * Dùng trong HR chatbot mode EXTERNAL để lấy candidateIds rồi filter Qdrant.
         */
        @Query("SELECT c FROM CandidateCV c WHERE c.position.id = :positionId AND c.deletedAt IS NULL")
        List<CandidateCV> findApplicationsByPositionId(@Param("positionId") int positionId);
@@ -96,7 +96,7 @@ public interface CandidateCVRepository extends JpaRepository<CandidateCV, Intege
         * Đếm số ứng viên Candidate đã nộp vào 1 position.
         * Dùng cho HR dashboard hiển thị số applicants.
         */
-       @Query("SELECT COUNT(c) FROM CandidateCV c WHERE c.position.id = :positionId AND c.sourceType = 'CANDIDATE' AND c.deletedAt IS NULL")
+       @Query("SELECT COUNT(c) FROM CandidateCV c WHERE c.position.id = :positionId AND c.sourceType = 'EXTERNAL' AND c.deletedAt IS NULL")
        long countApplicationsByPositionId(@Param("positionId") int positionId);
 
        /**
@@ -105,14 +105,14 @@ public interface CandidateCVRepository extends JpaRepository<CandidateCV, Intege
         * Chỉ trả về các bản ghi không bị soft-delete và có positionId (Application CV,
         * không phải Master).
         */
-       @Query("SELECT c FROM CandidateCV c LEFT JOIN FETCH c.position WHERE c.candidateId = :candidateId AND c.position IS NOT NULL AND c.sourceType = 'CANDIDATE' AND c.deletedAt IS NULL")
+       @Query("SELECT c FROM CandidateCV c LEFT JOIN FETCH c.position WHERE c.candidateId = :candidateId AND c.position IS NOT NULL AND c.sourceType = 'EXTERNAL' AND c.deletedAt IS NULL")
        List<CandidateCV> findApplicationsByCandidateId(@Param("candidateId") String candidateId);
 
        /**
         * Lấy Application CV của candidate cho một position cụ thể.
         * Dùng khi check_application_status tool muốn kiểm tra vị trí cụ thể.
         */
-       @Query("SELECT c FROM CandidateCV c LEFT JOIN FETCH c.position WHERE c.candidateId = :candidateId AND c.position.id = :positionId AND c.sourceType = 'CANDIDATE' AND c.deletedAt IS NULL")
+       @Query("SELECT c FROM CandidateCV c LEFT JOIN FETCH c.position WHERE c.candidateId = :candidateId AND c.position.id = :positionId AND c.sourceType = 'EXTERNAL' AND c.deletedAt IS NULL")
        List<CandidateCV> findApplicationsByCandidateIdAndPositionId(
                      @Param("candidateId") String candidateId,
                      @Param("positionId") int positionId);

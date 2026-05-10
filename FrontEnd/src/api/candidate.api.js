@@ -4,6 +4,7 @@ export const candidateApi = {
   filter: (params) => axiosClient.get('/cv/candidates', { params }),
   getById: (cvId) => axiosClient.get(`/cv/${cvId}`),
   getMyCV: () => axiosClient.get('/cv/me'),
+  getMyApplications: () => axiosClient.get('/cv/my-applications'),
   deleteMany: (ids) => axiosClient.delete('/cv', { data: ids }),
   updateInfo: (cvId, params) => axiosClient.put(`/cv/${cvId}`, null, { params }),
   scheduleInterview: (cvId, data) => axiosClient.post(`/cv/${cvId}/schedule-interview`, data),

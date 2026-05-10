@@ -1,4 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+
+const formatElapsed = (seconds) => {
+  const m = String(Math.floor(seconds / 60)).padStart(2, '0');
+  const s = String(seconds % 60).padStart(2, '0');
+  return `${m}:${s}`;
+};
 import {
   Button, Space, Switch, InputNumber, Typography, Tooltip,
   Tag, Input, Select, Row, Col, Drawer, App, Modal,
@@ -32,11 +38,13 @@ const PositionsPage = () => {
   const navigate = useNavigate();
   const { message, notification } = App.useApp();
   const jdSseControllerRef = useRef(null);
+  const jdTimerRef = useRef(null);
+  const jdStartTimeRef = useRef(null);
 
-  // Cleanup SSE khi unmount
   useEffect(() => {
     return () => {
       if (jdSseControllerRef.current) jdSseControllerRef.current.abort();
+      if (jdTimerRef.current) clearInterval(jdTimerRef.current);
     };
   }, []);
 
@@ -131,7 +139,6 @@ const PositionsPage = () => {
   const trackJDProcessing = useCallback(
     (batchId, positionTitle) => {
       if (!batchId) {
-        // Không có batchId thì vẫn thông báo tạo thành công và refresh
         message.success('Position created successfully!');
         queryClient.invalidateQueries({ queryKey: ['positions'] });
         return;
@@ -141,17 +148,57 @@ const PositionsPage = () => {
       const token = useAuthStore.getState().token;
       const key = `jd-${batchId}`;
 
+      if (jdTimerRef.current) clearInterval(jdTimerRef.current);
+      jdStartTimeRef.current = Date.now();
+
+      const getElapsed = () => formatElapsed(Math.floor((Date.now() - jdStartTimeRef.current) / 1000));
+
       notification.open({
         key,
         message: 'Processing Job Description',
-        description: `Parsing and embedding JD for "${positionTitle}"...`,
+        description: `Parsing and embedding JD for "${positionTitle}"... (00:00)`,
         icon: <SyncOutlined spin style={{ color: '#1677ff' }} />,
         duration: 0,
       });
 
+      jdTimerRef.current = setInterval(() => {
+        notification.open({
+          key,
+          message: 'Processing Job Description',
+          description: `Parsing and embedding JD for "${positionTitle}"... (${getElapsed()})`,
+          icon: <SyncOutlined spin style={{ color: '#1677ff' }} />,
+          duration: 0,
+        });
+      }, 1000);
+
       if (jdSseControllerRef.current) jdSseControllerRef.current.abort();
       const controller = new AbortController();
       jdSseControllerRef.current = controller;
+
+      const finish = (success) => {
+        clearInterval(jdTimerRef.current);
+        jdTimerRef.current = null;
+        const elapsed = getElapsed();
+        if (success) {
+          notification.open({
+            key,
+            message: 'JD Ready',
+            description: `"${positionTitle}" processed in ${elapsed} and is ready for candidate matching.`,
+            icon: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
+            duration: 5,
+          });
+          queryClient.invalidateQueries({ queryKey: ['positions'] });
+        } else {
+          notification.open({
+            key,
+            message: 'JD Processing Failed',
+            description: `Failed to process JD for "${positionTitle}" after ${elapsed}. Please check and retry.`,
+            icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
+            duration: 6,
+          });
+        }
+        controller.abort();
+      };
 
       fetchEventSource(`${BASE_URL}/tracking/${batchId}/stream`, {
         method: 'GET',
@@ -163,53 +210,23 @@ const PositionsPage = () => {
         openWhenHidden: true,
 
         onmessage: (event) => {
-          if (event.event === 'batch-completed') {
-            notification.open({
-              key,
-              message: 'JD Ready',
-              description: `"${positionTitle}" has been processed and is ready for candidate matching.`,
-              icon: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
-              duration: 5,
-            });
-            queryClient.invalidateQueries({ queryKey: ['positions'] });
-            controller.abort();
-            return;
-          }
-
+          if (event.event === 'batch-completed') { finish(true); return; }
           try {
             const status = JSON.parse(event.data);
-            if (status.status === 'COMPLETED') {
-              notification.open({
-                key,
-                message: 'JD Ready',
-                description: `"${positionTitle}" has been processed and is ready for candidate matching.`,
-                icon: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
-                duration: 5,
-              });
-              queryClient.invalidateQueries({ queryKey: ['positions'] });
-              controller.abort();
-            }
-          } catch {
-            // ignore parse errors
-          }
+            if (status.status === 'COMPLETED') finish(true);
+          } catch { /* ignore */ }
         },
 
         onerror: (err) => {
           if (err?.name === 'AbortError') return;
-          notification.open({
-            key,
-            message: 'JD Processing Failed',
-            description: `Failed to process JD for "${positionTitle}". Please check and retry.`,
-            icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
-            duration: 6,
-          });
+          finish(false);
           throw err;
         },
       });
 
       queryClient.invalidateQueries({ queryKey: ['positions'] });
     },
-    [notification, message, queryClient, jdSseControllerRef]
+    [notification, message, queryClient, jdSseControllerRef, jdTimerRef, jdStartTimeRef]
   );
 
   const handleToggleActive = useCallback(

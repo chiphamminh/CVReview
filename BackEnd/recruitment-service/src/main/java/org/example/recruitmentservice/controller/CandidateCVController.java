@@ -24,6 +24,20 @@ import java.util.List;
 public class CandidateCVController {
         private final CandidateCVService candidateCVService;
 
+        @PreAuthorize("hasRole('CANDIDATE')")
+        @GetMapping("/me")
+        public ApiResponse<CandidateCVResponse> getMasterCV(
+                        @RequestHeader("X-User-Id") String candidateId) {
+                return candidateCVService.getMasterCV(candidateId);
+        }
+
+        @PreAuthorize("hasRole('CANDIDATE')")
+        @GetMapping("/my-applications")
+        public ApiResponse<List<CandidateCVResponse>> getMyApplications(
+                        @RequestHeader("X-User-Id") String candidateId) {
+                return candidateCVService.getMyApplications(candidateId);
+        }
+
         @PreAuthorize("hasRole('HR')")
         @GetMapping("/{cvId}")
         public ApiResponse<CandidateCVResponse> getCVDetail(@PathVariable int cvId) {

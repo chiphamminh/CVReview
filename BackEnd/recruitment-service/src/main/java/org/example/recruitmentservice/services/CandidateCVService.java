@@ -18,6 +18,7 @@ import org.example.recruitmentservice.models.entity.Positions;
 import org.example.recruitmentservice.repository.CVAnalysisRepository;
 import org.example.recruitmentservice.repository.CandidateCVRepository;
 import org.example.recruitmentservice.repository.PositionRepository;
+import org.example.recruitmentservice.utils.PositionUtils;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 
@@ -45,6 +46,57 @@ public class CandidateCVService {
 
     @Value("${EMBEDDING_SERVICE_URL}")
     private String embeddingServiceUrl;
+
+    public ApiResponse<List<CandidateCVResponse>> getMyApplications(String candidateId) {
+        List<CandidateCV> applications = candidateCVRepository.findApplicationsByCandidateId(candidateId);
+
+        List<CandidateCVResponse> responseList = applications.stream().map(cv -> {
+            CVAnalysis cvAnalysis = cv.getAnalysis();
+            return CandidateCVResponse.builder()
+                    .cvId(cv.getId())
+                    .positionId(cv.getPosition() != null ? cv.getPosition().getId() : 0)
+                    .positionTitle(
+                            cv.getPosition() != null
+                                    ? PositionUtils.formatPositionTitle(cv.getPosition().getSeniority(),
+                                            cv.getPosition().getTitle())
+                                    : null)
+                    .technicalScore(cvAnalysis != null ? cvAnalysis.getTechnicalScore() : null)
+                    .experienceScore(cvAnalysis != null ? cvAnalysis.getExperienceScore() : null)
+                    .overallStatus(cvAnalysis != null ? cvAnalysis.getOverallStatus() : null)
+                    .aiAssessment(cvAnalysis != null ? cvAnalysis.getAiAssessment() : null)
+                    .learningPath(cvAnalysis != null ? cvAnalysis.getLearningPath() : null)
+                    .recruitmentStage(cv.getRecruitmentStage())
+                    .interviewSchedule(cv.getInterviewSchedule())
+                    .appliedDate(cv.getAppliedDate())
+                    .build();
+        }).toList();
+
+        return new ApiResponse<>(
+                ErrorCode.SUCCESS.getCode(),
+                "Applications retrieved successfully",
+                responseList);
+    }
+
+    public ApiResponse<CandidateCVResponse> getMasterCV(String candidateId) {
+        CandidateCV cv = candidateCVRepository.findMasterCvByCandidateId(candidateId)
+                .orElseThrow(() -> new CustomException(ErrorCode.CV_NOT_FOUND));
+
+        CandidateCVResponse response = CandidateCVResponse.builder()
+                .cvId(cv.getId())
+                .name(cv.getName())
+                .email(cv.getEmail())
+                .driveFileUrl(cv.getDriveFileUrl())
+                .status(cv.getCvStatus())
+                .sourceType(cv.getSourceType())
+                .createdAt(cv.getCreatedAt())
+                .updatedAt(cv.getUpdatedAt())
+                .build();
+
+        return new ApiResponse<>(
+                ErrorCode.SUCCESS.getCode(),
+                "Master CV retrieved successfully",
+                response);
+    }
 
     public ApiResponse<CandidateCVResponse> getCVDetail(int cvId) {
         CandidateCV cv = candidateCVRepository.findById(cvId)
