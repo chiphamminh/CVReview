@@ -10,13 +10,13 @@ import Login from '@/pages/Login';
 import PositionsPage from '@/pages/hr/PositionsPage';
 import CandidatesPage from '@/pages/hr/CandidatesPage';
 import HRChatbotPage from '@/pages/hr/HRChatbotPage';
+import HRDashboardPage from '@/pages/hr/HRDashboardPage';
 
 import CandidateLayout from '@/layouts/CandidateLayout';
 import CareerPage from '@/pages/candidate/CareerPage';
 import CVPage from '@/pages/candidate/CVPage';
 
 const NotFound = () => <div>404 - Not Found</div>;
-const HRDashboard = () => <div>HR Dashboard</div>;
 
 const AppRoutes = () => {
   return (
@@ -43,7 +43,7 @@ const AppRoutes = () => {
             <ProtectedRoute allowedRoles={['HR', 'ADMIN']}>
               <HRLayout>
                 <Routes>
-                  <Route path="dashboard" element={<HRDashboard />} />
+                  <Route path="dashboard" element={<HRDashboardPage />} />
                   <Route path="positions" element={<PositionsPage />} />
                   <Route path="candidates" element={<CandidatesPage />} />
                   <Route path="chatbot/:positionId?" element={<HRChatbotPage />} />
