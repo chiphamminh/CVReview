@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Row, Col, Card, Typography, Segmented, Button, Space } from 'antd';
+import { Row, Col, Card, Typography, Segmented, Button, Space, Alert } from 'antd';
 import {
   FileDoneOutlined, StarOutlined, ClockCircleOutlined,
   CheckCircleOutlined, ReloadOutlined,
@@ -14,28 +14,33 @@ const { Text, Title } = Typography;
 const SCORE_COLORS = ['#ff4d4f', '#fa8c16', '#fadb14', '#52c41a', '#1677ff'];
 const STATUS_COLORS = ['#52c41a', '#1677ff', '#ff4d4f'];
 const FUNNEL_COLORS = ['#1677ff', '#4096ff', '#69b1ff', '#91caff'];
-
 const STALE_TIME = 60_000;
 
 const HRDashboardPage = () => {
   const [days, setDays] = useState(30);
   const queryClient = useQueryClient();
 
-  const { data: trafficRes, isLoading: trafficLoading } = useQuery({
+  const {
+    data: trafficRes, isLoading: trafficLoading, isError: trafficError,
+  } = useQuery({
     queryKey: ['hr-traffic', days],
     queryFn: () => analyticsApi.getCvTraffic(days),
     staleTime: STALE_TIME,
     refetchInterval: STALE_TIME,
   });
 
-  const { data: overviewRes, isLoading: overviewLoading } = useQuery({
+  const {
+    data: overviewRes, isLoading: overviewLoading, isError: overviewError,
+  } = useQuery({
     queryKey: ['hr-overview', days],
     queryFn: () => analyticsApi.getOverview(days),
     staleTime: STALE_TIME,
     refetchInterval: STALE_TIME,
   });
 
-  const { data: distributionRes, isLoading: distLoading } = useQuery({
+  const {
+    data: distributionRes, isLoading: distLoading, isError: distError,
+  } = useQuery({
     queryKey: ['hr-score-distribution'],
     queryFn: () => analyticsApi.getScoreDistribution(),
     staleTime: 300_000,
@@ -46,6 +51,8 @@ const HRDashboardPage = () => {
   const buckets = distributionRes?.data?.buckets ?? [];
 
   const timeSavedHours = Math.ceil((traffic.successCv ?? 0) * 5 / 60);
+  const isKpiLoading = trafficLoading || overviewLoading;
+  const isKpiError = trafficError || overviewError;
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ['hr-traffic'] });
@@ -70,6 +77,7 @@ const HRDashboardPage = () => {
   };
 
   // ── CV Status Breakdown donut config ─────────────────────────────────────
+  const totalCvs = traffic.totalCv ?? 0;
   const statusData = [
     { type: 'Processed', value: traffic.successCv ?? 0 },
     { type: 'Processing', value: traffic.processingCv ?? 0 },
@@ -85,6 +93,21 @@ const HRDashboardPage = () => {
     label: false,
     legend: { color: { position: 'right', layout: { justifyContent: 'center' } } },
     tooltip: { items: [{ field: 'type', name: 'Status' }, { field: 'value', name: 'Count' }] },
+    // Center annotation showing total
+    annotations: [
+      {
+        type: 'text',
+        style: {
+          x: '50%',
+          y: '50%',
+          text: `Total\n${totalCvs.toLocaleString()}`,
+          textAlign: 'center',
+          fontSize: 14,
+          fontWeight: 600,
+          fill: '#262626',
+        },
+      },
+    ],
     autoFit: true,
   };
 
@@ -100,18 +123,22 @@ const HRDashboardPage = () => {
     data: funnelData,
     xField: 'stage',
     yField: 'count',
-    scale: { color: { range: FUNNEL_COLORS } },
     colorField: 'stage',
+    scale: { color: { range: FUNNEL_COLORS } },
     label: {
-      text: (d) => `${d.stage}: ${(d.count ?? 0).toLocaleString()}`,
+      text: (d, idx) => {
+        const prev = funnelData[idx - 1];
+        const rate = prev && prev.count > 0
+          ? ` (${Math.round((d.count / prev.count) * 100)}%)`
+          : '';
+        return `${d.stage}: ${(d.count ?? 0).toLocaleString()}${rate}`;
+      },
       position: 'inside',
-      style: { fill: '#fff', fontSize: 13, fontWeight: 600 },
+      style: { fill: '#fff', fontSize: 12, fontWeight: 600 },
     },
     tooltip: { items: [{ field: 'stage', name: 'Stage' }, { field: 'count', name: 'CVs' }] },
     autoFit: true,
   };
-
-  const isKpiLoading = trafficLoading || overviewLoading;
 
   return (
     <div style={{ padding: 24 }}>
@@ -139,7 +166,7 @@ const HRDashboardPage = () => {
             icon={<FileDoneOutlined />}
             iconColor="#1677ff"
             title="Total CVs Processed"
-            value={traffic.successCv ?? 0}
+            value={isKpiError ? '—' : (traffic.successCv ?? 0)}
             loading={isKpiLoading}
           />
         </Col>
@@ -148,8 +175,8 @@ const HRDashboardPage = () => {
             icon={<StarOutlined />}
             iconColor="#faad14"
             title="Avg Matching Score"
-            value={overview.avgMatchingScore ?? 0}
-            suffix="/ 100"
+            value={isKpiError ? '—' : (overview.avgMatchingScore ?? 0)}
+            suffix={isKpiError ? '' : '/ 100'}
             precision={1}
             loading={isKpiLoading}
           />
@@ -159,8 +186,8 @@ const HRDashboardPage = () => {
             icon={<ClockCircleOutlined />}
             iconColor="#722ed1"
             title="Time Saved (Est.)"
-            value={timeSavedHours}
-            suffix="hrs"
+            value={isKpiError ? '—' : timeSavedHours}
+            suffix={isKpiError ? '' : 'hrs'}
             note="~5 min/CV"
             loading={isKpiLoading}
           />
@@ -170,8 +197,8 @@ const HRDashboardPage = () => {
             icon={<CheckCircleOutlined />}
             iconColor="#52c41a"
             title="Success Match Rate"
-            value={overview.successMatchRate ?? 0}
-            suffix="%"
+            value={isKpiError ? '—' : (overview.successMatchRate ?? 0)}
+            suffix={isKpiError ? '' : '%'}
             note="Score ≥ 70"
             precision={1}
             loading={isKpiLoading}
@@ -183,7 +210,9 @@ const HRDashboardPage = () => {
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col xs={24} lg={14}>
           <Card title="Candidate Score Distribution" loading={distLoading}>
-            {buckets.length > 0 ? (
+            {distError ? (
+              <ChartError />
+            ) : buckets.length > 0 ? (
               <Column {...columnConfig} height={280} />
             ) : (
               <EmptyChart height={280} text="No scored CVs yet" />
@@ -192,7 +221,9 @@ const HRDashboardPage = () => {
         </Col>
         <Col xs={24} lg={10}>
           <Card title="Processing Funnel" loading={isKpiLoading}>
-            {funnelData[0].count > 0 ? (
+            {isKpiError ? (
+              <ChartError />
+            ) : funnelData[0].count > 0 ? (
               <Funnel {...funnelConfig} height={280} />
             ) : (
               <EmptyChart height={280} text="No CV data yet" />
@@ -205,7 +236,9 @@ const HRDashboardPage = () => {
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={10}>
           <Card title={`CV Status Breakdown (Last ${days} Days)`} loading={trafficLoading}>
-            {statusData.length > 0 ? (
+            {trafficError ? (
+              <ChartError />
+            ) : statusData.length > 0 ? (
               <Pie {...donutConfig} height={260} />
             ) : (
               <EmptyChart height={260} text="No data available" />
@@ -218,16 +251,19 @@ const HRDashboardPage = () => {
 };
 
 const EmptyChart = ({ height, text }) => (
-  <div
-    style={{
-      height,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-    }}
-  >
+  <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
     <Text type="secondary">{text}</Text>
   </div>
+);
+
+const ChartError = () => (
+  <Alert
+    type="error"
+    message="Failed to load data"
+    description="Could not reach the analytics service. Please refresh or try again later."
+    showIcon
+    style={{ margin: '12px 0' }}
+  />
 );
 
 export default HRDashboardPage;

@@ -1,4 +1,6 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { Spin } from 'antd';
 import useAuthStore from '@/store/authStore';
 
 // Layouts & Protected Routes
@@ -10,11 +12,19 @@ import Login from '@/pages/Login';
 import PositionsPage from '@/pages/hr/PositionsPage';
 import CandidatesPage from '@/pages/hr/CandidatesPage';
 import HRChatbotPage from '@/pages/hr/HRChatbotPage';
-import HRDashboardPage from '@/pages/hr/HRDashboardPage';
+
+// Lazy-load dashboard to code-split the heavy @ant-design/plots bundle
+const HRDashboardPage = lazy(() => import('@/pages/hr/HRDashboardPage'));
 
 import CandidateLayout from '@/layouts/CandidateLayout';
 import CareerPage from '@/pages/candidate/CareerPage';
 import CVPage from '@/pages/candidate/CVPage';
+
+const PageLoader = () => (
+  <div style={{ height: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <Spin size="large" />
+  </div>
+);
 
 const NotFound = () => <div>404 - Not Found</div>;
 
@@ -43,7 +53,7 @@ const AppRoutes = () => {
             <ProtectedRoute allowedRoles={['HR', 'ADMIN']}>
               <HRLayout>
                 <Routes>
-                  <Route path="dashboard" element={<HRDashboardPage />} />
+                  <Route path="dashboard" element={<Suspense fallback={<PageLoader />}><HRDashboardPage /></Suspense>} />
                   <Route path="positions" element={<PositionsPage />} />
                   <Route path="candidates" element={<CandidatesPage />} />
                   <Route path="chatbot/:positionId?" element={<HRChatbotPage />} />

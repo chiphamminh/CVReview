@@ -123,26 +123,27 @@ public class HRAnalyticsController {
     @GetMapping("/score-distribution")
     public ApiResponse<ScoreDistributionResponse> getScoreDistribution() {
         try {
-            // Buckets dùng sum = technicalScore + experienceScore (tránh floating-point trong JPQL).
+            // Buckets dùng sum = technicalScore + experienceScore (tránh floating-point
+            // trong JPQL).
             // composite = sum / 2.0 → bucket 0-20 = sum [0, 42), 21-40 = sum [42, 82), v.v.
             List<ScoreDistributionResponse.ScoreBucket> buckets = List.of(
-                    new ScoreDistributionResponse.ScoreBucket("0-20", "Rất yếu",
+                    new ScoreDistributionResponse.ScoreBucket("0-20", "Very Weak",
                             cvAnalysisRepository.countInCompositeRange(0, 42)),
-                    new ScoreDistributionResponse.ScoreBucket("21-40", "Yếu",
+                    new ScoreDistributionResponse.ScoreBucket("21-40", "Weak",
                             cvAnalysisRepository.countInCompositeRange(42, 82)),
-                    new ScoreDistributionResponse.ScoreBucket("41-60", "Trung bình",
+                    new ScoreDistributionResponse.ScoreBucket("41-60", "Average",
                             cvAnalysisRepository.countInCompositeRange(82, 122)),
-                    new ScoreDistributionResponse.ScoreBucket("61-80", "Khá",
+                    new ScoreDistributionResponse.ScoreBucket("61-80", "Good",
                             cvAnalysisRepository.countInCompositeRange(122, 162)),
-                    new ScoreDistributionResponse.ScoreBucket("81-100", "Xuất sắc",
-                            cvAnalysisRepository.countInCompositeRange(162, 202))
-            );
+                    new ScoreDistributionResponse.ScoreBucket("81-100", "Excellent",
+                            cvAnalysisRepository.countInCompositeRange(162, 202)));
 
             return new ApiResponse<>(ErrorCode.SUCCESS.getCode(), "Score distribution retrieved successfully",
                     ScoreDistributionResponse.builder().buckets(buckets).build());
         } catch (Exception e) {
             e.printStackTrace();
-            return new ApiResponse<>(ErrorCode.INTERNAL_SERVER_ERROR.getCode(), "Failed to get score distribution", null);
+            return new ApiResponse<>(ErrorCode.INTERNAL_SERVER_ERROR.getCode(), "Failed to get score distribution",
+                    null);
         }
     }
 
