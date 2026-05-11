@@ -13,6 +13,7 @@ import org.example.recruitmentservice.models.entity.CVAnalysis;
 import org.example.recruitmentservice.models.entity.CandidateCV;
 import org.example.recruitmentservice.models.entity.Positions;
 import org.example.recruitmentservice.models.enums.RecruitmentStage;
+import org.example.recruitmentservice.models.enums.SourceType;
 import org.example.recruitmentservice.repository.CVAnalysisRepository;
 import org.example.recruitmentservice.repository.CandidateCVRepository;
 import org.example.recruitmentservice.repository.PositionRepository;
@@ -94,9 +95,9 @@ public class ChatbotInternalService {
          * @param passThreshold ngưỡng điểm pass (mặc định 75)
          */
         public CvStatisticsResponse getCvStatistics(int positionId, int passThreshold, String mode) {
-                org.example.recruitmentservice.models.enums.SourceType sourceType = "HR_MODE".equals(mode)
-                                ? org.example.recruitmentservice.models.enums.SourceType.INTERNAL
-                                : org.example.recruitmentservice.models.enums.SourceType.EXTERNAL;
+                SourceType sourceType = "INTERNAL".equals(mode)
+                                ? SourceType.INTERNAL
+                                : SourceType.EXTERNAL;
                 long total = candidateCVRepository.countByPositionIdAndSourceType(positionId, sourceType);
                 long scored = cvAnalysisRepository.countScoredByPositionIdAndSourceType(positionId, sourceType);
                 long passed = cvAnalysisRepository.countPassedByPositionIdAndSourceType(positionId, sourceType,

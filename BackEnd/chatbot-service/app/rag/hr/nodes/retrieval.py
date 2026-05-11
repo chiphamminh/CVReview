@@ -189,7 +189,7 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
     )
 
     # Build base filters per mode
-    if state["mode"] == "HR_MODE":
+    if state["mode"] == "INTERNAL":
         base_filters = _build_hr_base_filters(position_id)
     else:
         base_filters = _build_candidate_base_filters(position_id)

@@ -99,7 +99,7 @@ const HRLayout = ({ children }) => {
             </Dropdown>
           </div>
         </Header>
-        <Content style={{ margin: '16px 16px', padding: 24, minHeight: 280, background: colorBgContainer, borderRadius: borderRadiusLG, overflow: 'auto' }}>
+        <Content style={{ margin: '16px 16px', padding: 5, minHeight: 280, background: colorBgContainer, borderRadius: borderRadiusLG, overflow: 'auto' }}>
           {children}
         </Content>
       </Layout>

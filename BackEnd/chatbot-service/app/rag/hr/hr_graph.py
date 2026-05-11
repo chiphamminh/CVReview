@@ -142,7 +142,7 @@ class HRChatbot:
         session_id: str,
         hr_id: str,
         position_id: int,
-        mode: Literal["HR_MODE", "CANDIDATE_MODE"],
+        mode: Literal["INTERNAL", "EXTERNAL"],
     ) -> Dict[str, Any]:
         initial_state: HRChatState = {
             "query":                      query,

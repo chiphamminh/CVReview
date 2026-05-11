@@ -96,16 +96,40 @@ public class ChatSessionService {
         return toMessageResponse(history);
     }
 
-    /** Lấy danh sách sessions của user — FE dùng để render sidebar chat history. */
-    public Page<ChatSessionResponse> getUserSessions(String userId, Pageable pageable) {
-        return chatSessionRepository
-                .findByUserIdOrderByLastActiveAtDesc(userId, pageable)
-                .map(this::toSessionResponse);
+    /**
+     * Lấy danh sách sessions của user — FE dùng để render sidebar.
+     * positionId null = tất cả sessions (Candidate), non-null = lọc theo position (HR sidebar).
+     */
+    public Page<ChatSessionResponse> getUserSessions(String userId, Integer positionId, Pageable pageable) {
+        Page<ChatSession> page = (positionId != null)
+                ? chatSessionRepository.findByUserIdAndPositionIdOrderByLastActiveAtDesc(userId, positionId, pageable)
+                : chatSessionRepository.findByUserIdOrderByLastActiveAtDesc(userId, pageable);
+        return page.map(this::toSessionResponse);
     }
 
     /**
-     * Lấy full chat history của 1 session — FE dùng khi user click vào 1 session
-     * cũ.
+     * Cursor-based pagination cho FE history panel — infinite scroll lên trên.
+     * Trả về {@code limit} messages kể từ cursor {@code beforeId} (exclusive),
+     * theo thứ tự chronological (cũ → mới) để FE có thể prepend trực tiếp.
+     *
+     * @param beforeId null = first page (latest messages), non-null = older messages before this id
+     */
+    public List<ChatMessageResponse> getHistoryPage(String sessionId, int limit, Long beforeId) {
+        validateSessionExists(sessionId);
+        Pageable pageable = PageRequest.of(0, limit);
+        List<ChatHistory> messages;
+        if (beforeId != null) {
+            messages = chatHistoryRepository.findBySessionIdAndIdBeforeOrderByIdDesc(sessionId, beforeId, pageable);
+        } else {
+            messages = chatHistoryRepository.findTopBySessionIdOrderByIdDesc(sessionId, pageable);
+        }
+        // Đảo lại để trả về chronological order (cũ → mới) cho FE render đúng
+        Collections.reverse(messages);
+        return messages.stream().map(this::toMessageResponse).collect(Collectors.toList());
+    }
+
+    /**
+     * Lấy full chat history của 1 session — dùng nội bộ cho LLM context full load.
      */
     public List<ChatMessageResponse> getFullHistory(String sessionId) {
         validateSessionExists(sessionId);

@@ -32,18 +32,20 @@ public class ChatbotPublicController {
     private final ChatSessionService chatSessionService;
 
     /**
-     * GET /api/chatbot/sessions — Danh sách sessions của user hiện tại.
-     * Sắp xếp theo lastActiveAt DESC — session mới nhất lên đầu.
+     * GET /api/chatbot/sessions?positionId=5&page=0&size=20
+     * Danh sách sessions của user. positionId optional — HR truyền để lọc đúng position,
+     * Candidate không truyền để lấy tất cả CANDIDATE sessions.
      */
     @PreAuthorize("hasAnyRole('HR', 'CANDIDATE')")
     @GetMapping("/sessions")
     public ApiResponse<PageResponse<ChatSessionResponse>> getUserSessions(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) Integer positionId,
             HttpServletRequest request) {
         String userId = extractUserId(request);
         Pageable pageable = PageRequest.of(page, size);
-        Page<ChatSessionResponse> sessions = chatSessionService.getUserSessions(userId, pageable);
+        Page<ChatSessionResponse> sessions = chatSessionService.getUserSessions(userId, positionId, pageable);
         return ApiResponse.<PageResponse<ChatSessionResponse>>builder()
                 .statusCode(ErrorCode.SUCCESS.getCode())
                 .message("Sessions fetched successfully")
@@ -52,17 +54,19 @@ public class ChatbotPublicController {
     }
 
     /**
-     * GET /api/chatbot/sessions/{sessionId} — Full chat history của 1 session.
-     * FE dùng để render lại toàn bộ cuộc hội thoại khi user click vào session cũ.
+     * GET /api/chatbot/sessions/{sessionId}?limit=10&beforeId=123
+     * Cursor-based pagination cho FE chat history (infinite scroll lên trên).
+     * beforeId absent = first page (latest messages). beforeId present = older messages before that id.
      */
     @PreAuthorize("hasAnyRole('HR', 'CANDIDATE')")
     @GetMapping("/sessions/{sessionId}")
     public ApiResponse<List<ChatMessageResponse>> getSessionHistory(
             @PathVariable String sessionId,
+            @RequestParam(defaultValue = "10") int limit,
+            @RequestParam(required = false) Long beforeId,
             HttpServletRequest request) {
-        // userId dùng để log audit, không cần dùng trực tiếp vì sessionId đã là unique key
         extractUserId(request);
-        List<ChatMessageResponse> history = chatSessionService.getFullHistory(sessionId);
+        List<ChatMessageResponse> history = chatSessionService.getHistoryPage(sessionId, limit, beforeId);
         return new ApiResponse<>(ErrorCode.SUCCESS.getCode(), "History fetched successfully", history);
     }
 

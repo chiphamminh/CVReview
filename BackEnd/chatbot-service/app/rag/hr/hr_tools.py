@@ -141,7 +141,7 @@ async def search_candidates_by_criteria(
 
     Args:
         position_id:   ID vị trí cần lọc (tự động inject từ session)
-        mode:          Chế độ HR_MODE hoặc CANDIDATE_MODE (tự động inject từ session)
+        mode:          Chế độ INTERNAL hoặc EXTERNAL (tự động inject từ session)
         min_score:     Lọc ứng viên có điểm >= giá trị này (optional)
         skill_keyword: Từ khóa kỹ năng tìm trong skillMatch (optional, không phân biệt hoa thường)
         name_keyword:  Từ khóa tên ứng viên (optional, không phân biệt hoa thường)
@@ -152,7 +152,7 @@ async def search_candidates_by_criteria(
         if not applications:
             return f"Không có ứng viên nào trong vị trí ID {position_id}."
 
-        target_source = "INTERNAL" if mode == "HR_MODE" else "EXTERNAL"
+        target_source = mode  # mode is now "INTERNAL" or "EXTERNAL" directly
         results = [app for app in applications if app.get("sourceType") == target_source]
 
         if min_score is not None:

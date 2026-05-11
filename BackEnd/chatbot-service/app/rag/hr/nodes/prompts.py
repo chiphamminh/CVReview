@@ -36,7 +36,7 @@ _STRATEGY_HINTS: dict[str, str] = {
 def build_hr_prompts_node(state: HRChatState) -> HRChatState:
     """Assemble system + user prompts for the HR LLM call, adapted by pipeline_strategy."""
     strategy     = state.get("pipeline_strategy", "RANK")
-    mode_label   = "HR Mode (sourced CVs)" if state["mode"] == "HR_MODE" else "Candidate Mode (inbound applications)"
+    mode_label   = "Internal Mode (HR-sourced CVs)" if state["mode"] == "INTERNAL" else "External Mode (inbound applications)"
     history_text = _format_history(state.get("conversation_history", []))
     cv_text = (
         _format_cv_context(state.get("cv_context", []), state.get("cv_id_to_meta", {}))

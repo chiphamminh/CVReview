@@ -16,7 +16,7 @@ router = APIRouter()
 class HRSessionCreateRequest(BaseModel):
     hr_id: str
     position_id: int
-    mode: Literal["HR_MODE", "CANDIDATE_MODE"]
+    mode: Literal["INTERNAL", "EXTERNAL"]
 
 
 class HRSessionResponse(BaseModel):
@@ -28,7 +28,7 @@ class HRChatRequest(BaseModel):
     query: str
     hr_id: str
     position_id: int
-    mode: Literal["HR_MODE", "CANDIDATE_MODE"]
+    mode: Literal["INTERNAL", "EXTERNAL"]
 
 
 class HRChatResponse(BaseModel):

@@ -9,7 +9,7 @@ async def load_candidate_scope_node(state: HRChatState) -> HRChatState:
         applications = await recruitment_api.get_applications(
             position_id=state["position_id"]
         )
-        target_source = "INTERNAL" if state["mode"] == "HR_MODE" else "EXTERNAL"
+        target_source = state["mode"]  # mode is now "INTERNAL" or "EXTERNAL" directly
         filtered_apps = [app for app in applications if app.get("sourceType") == target_source]
 
         # Position name from SQL

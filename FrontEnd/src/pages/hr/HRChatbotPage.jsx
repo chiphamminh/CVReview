@@ -1,170 +1,491 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Layout, Menu, Input, Button, Typography, Space, Segmented, Avatar, Select } from 'antd';
-import { SendOutlined, RobotOutlined, UserOutlined, PlusOutlined } from '@ant-design/icons';
-import ReactMarkdown from 'react-markdown';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import {
+  Layout, Menu, Input, Button, Typography, Space,
+  Segmented, Avatar, Select, Modal, Spin, Tooltip, Tag,
+  message as antMessage,
+} from 'antd';
+import { SendOutlined, RobotOutlined, UserOutlined, PlusOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
+import ChatMarkdown from '@/components/chatbot/ChatMarkdown';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { fetchActivePositions } from '@/api/mockData';
+import { positionApi } from '@/api/position.api';
+import { chatbotApi } from '@/api/chatbot.api';
+import useAuthStore from '@/store/authStore';
+import useChatbotStore from '@/store/chatbotStore';
 
 const { Sider, Content } = Layout;
 const { Title, Text } = Typography;
 
-// Mock Chat History
-const mockSessions = [
-  { id: '1', title: 'Analyze Java Backend JD' },
-  { id: '2', title: 'Filter Senior React Candidates' },
-  { id: '3', title: 'Generate Interview Questions' },
-];
+const CHAT_PAGE_SIZE = 10;
+
+const formatDate = (dateStr) => {
+  const d = new Date(dateStr);
+  return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+};
+
+const mapRole = (role) => (role === 'USER' ? 'user' : 'assistant');
 
 const HRChatbotPage = () => {
-  const { positionId } = useParams();
+  const { positionId: urlPositionId } = useParams();
   const navigate = useNavigate();
-  const [mode, setMode] = useState('Internal'); // Internal | External
-  const [messages, setMessages] = useState([
-    { role: 'assistant', content: 'Hello HR! I am your AI Assistant. How can I help you today?' }
-  ]);
+  const { user } = useAuthStore();
+
+  const [sessions, setSessions] = useState([]);
+  const {
+    selectedPositionId: storedPositionId,
+    currentSessionId,
+    mode,
+    sidebarCollapsed,
+    setSelectedPositionId,
+    setCurrentSessionId,
+    setMode,
+    setSidebarCollapsed,
+  } = useChatbotStore();
+  const selectedPositionId = urlPositionId ? parseInt(urlPositionId) : storedPositionId;
+
+  const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [firstMessageId, setFirstMessageId] = useState(null);
+
+  const [showModeModal, setShowModeModal] = useState(false);
+  const [modalMode, setModalMode] = useState('Internal');
+  const [creatingSession, setCreatingSession] = useState(false);
+
   const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
+  const topSentinelRef = useRef(null);
+  const suppressScrollRef = useRef(false);
+  // Captures the session that was active when this page mounted (for restore on back-navigation)
+  const initialSessionId = useRef(currentSessionId);
 
-  const { data: activePositions } = useQuery({
+  // ── Active positions for dropdown + session title resolution ──
+  const { data: positionsData } = useQuery({
     queryKey: ['activePositions'],
-    queryFn: fetchActivePositions,
+    queryFn: () => positionApi.filter({ isActive: true, size: 50 }).then(r => r.data?.content || []),
   });
+  const positions = positionsData || [];
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const positionMap = useMemo(() => {
+    const map = {};
+    positions.forEach(p => { map[p.id] = p; });
+    return map;
+  }, [positions]);
 
+  const getSessionTitle = useCallback((session) => {
+    const pos = positionMap[session.positionId];
+    const date = formatDate(session.createdAt);
+    if (!pos) return `Session — ${date}`;
+    return `${pos.seniority} ${pos.title} — ${date}`;
+  }, [positionMap]);
+
+  // ── Session restore — reload history when navigating back to this page ──
   useEffect(() => {
-    scrollToBottom();
+    const sessionId = initialSessionId.current;
+    if (!sessionId) return;
+    setLoadingHistory(true);
+    setMessages([]);
+    setFirstMessageId(null);
+    setHasOlderMessages(false);
+    chatbotApi.getSessionHistory(sessionId, { limit: CHAT_PAGE_SIZE })
+      .then(res => {
+        const history = res.data || [];
+        const feMsgs = history.map(m => ({ id: m.id, role: mapRole(m.role), content: m.content }));
+        setMessages(feMsgs);
+        if (history.length > 0) {
+          setFirstMessageId(history[0].id);
+          setHasOlderMessages(history.length === CHAT_PAGE_SIZE);
+        }
+      })
+      .catch(() => { setCurrentSessionId(null); })
+      .finally(() => { setLoadingHistory(false); });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Load sessions for current position only ──
+  const loadSessions = useCallback(async () => {
+    if (!selectedPositionId) {
+      setSessions([]);
+      return;
+    }
+    try {
+      const res = await chatbotApi.getSessions({ page: 0, size: 20, positionId: selectedPositionId });
+      setSessions(res.data?.content || []);
+    } catch {
+      // silent — sidebar is non-critical
+    }
+  }, [selectedPositionId]);
+
+  useEffect(() => { loadSessions(); }, [loadSessions]);
+
+  // ── Scroll to bottom on new messages (suppressed during prepend) ──
+  useEffect(() => {
+    if (suppressScrollRef.current) {
+      suppressScrollRef.current = false;
+      return;
+    }
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = () => {
-    if (!inputValue.trim()) return;
+  // ── loadOlderMessages — defined before the IntersectionObserver effect ──
+  const loadOlderMessages = useCallback(async () => {
+    if (!currentSessionId || !hasOlderMessages || loadingOlder || firstMessageId === null) return;
 
-    const userMsg = { role: 'user', content: inputValue };
-    setMessages(prev => [...prev, userMsg]);
+    setLoadingOlder(true);
+    const container = messagesContainerRef.current;
+    const prevScrollHeight = container?.scrollHeight || 0;
+    suppressScrollRef.current = true;
+
+    try {
+      const res = await chatbotApi.getSessionHistory(currentSessionId, {
+        limit: CHAT_PAGE_SIZE,
+        beforeId: firstMessageId,
+      });
+      const older = res.data || [];
+      if (older.length === 0) {
+        setHasOlderMessages(false);
+        return;
+      }
+      const feMsgs = older.map(m => ({ id: m.id, role: mapRole(m.role), content: m.content }));
+      setMessages(prev => [...feMsgs, ...prev]);
+      setFirstMessageId(older[0].id);
+      setHasOlderMessages(older.length === CHAT_PAGE_SIZE);
+
+      // Maintain scroll position after DOM update
+      requestAnimationFrame(() => {
+        if (container) container.scrollTop = container.scrollHeight - prevScrollHeight;
+      });
+    } catch {
+      suppressScrollRef.current = false;
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [currentSessionId, hasOlderMessages, loadingOlder, firstMessageId]);
+
+  // ── IntersectionObserver — infinite scroll up ──
+  useEffect(() => {
+    if (!topSentinelRef.current || !hasOlderMessages || loadingOlder) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) loadOlderMessages(); },
+      { root: messagesContainerRef.current, threshold: 0.1 }
+    );
+    observer.observe(topSentinelRef.current);
+    return () => observer.disconnect();
+  }, [hasOlderMessages, loadingOlder, loadOlderMessages]);
+
+  // ── Select a session from sidebar ──
+  const handleSelectSession = useCallback(async (session) => {
+    if (currentSessionId === session.sessionId) return;
+
+    setCurrentSessionId(session.sessionId);
+    setSelectedPositionId(session.positionId || null);
+    setMode(session.mode === 'INTERNAL' ? 'Internal' : 'External');
+    navigate(session.positionId ? `/hr/chatbot/${session.positionId}` : '/hr/chatbot');
+
+    setLoadingHistory(true);
+    setMessages([]);
+    setFirstMessageId(null);
+    setHasOlderMessages(false);
+
+    try {
+      const res = await chatbotApi.getSessionHistory(session.sessionId, { limit: CHAT_PAGE_SIZE });
+      const history = res.data || [];
+      const feMsgs = history.map(m => ({ id: m.id, role: mapRole(m.role), content: m.content }));
+      setMessages(feMsgs);
+      if (history.length > 0) {
+        setFirstMessageId(history[0].id);
+        setHasOlderMessages(history.length === CHAT_PAGE_SIZE);
+      }
+    } catch {
+      antMessage.error('Failed to load chat history');
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [currentSessionId, navigate]);
+
+  // ── Position dropdown change ──
+  const handlePositionChange = (val) => {
+    setSelectedPositionId(val || null);
+    navigate(val ? `/hr/chatbot/${val}` : '/hr/chatbot');
+  };
+
+  // ── New Chat ──
+  const handleNewChatClick = () => {
+    if (!selectedPositionId) {
+      antMessage.warning('Please select a position first');
+      return;
+    }
+    setModalMode('Internal');
+    setShowModeModal(true);
+  };
+
+  const handleCreateSession = async () => {
+    setCreatingSession(true);
+    try {
+      const beMode = modalMode === 'Internal' ? 'INTERNAL' : 'EXTERNAL';
+      const res = await chatbotApi.createHRSession(user.id, selectedPositionId, beMode);
+      setCurrentSessionId(res.session_id);
+      setMode(modalMode);
+      setMessages([{ role: 'assistant', content: 'Hello HR! I am your AI Assistant. How can I help you today?' }]);
+      setFirstMessageId(null);
+      setHasOlderMessages(false);
+      setShowModeModal(false);
+      await loadSessions();
+    } catch {
+      antMessage.error('Failed to create session');
+    } finally {
+      setCreatingSession(false);
+    }
+  };
+
+  // ── Send message ──
+  const handleSend = async () => {
+    const content = inputValue.trim();
+    if (!content) return;
+    if (!currentSessionId) {
+      antMessage.warning('Please start a new chat session first');
+      return;
+    }
+
+    setMessages(prev => [...prev, { role: 'user', content }]);
     setInputValue('');
     setIsLoading(true);
 
-    // Mock AI response
-    setTimeout(() => {
-      const aiResponse = `Received your request: **${userMsg.content}** in **${mode}** mode.\n\nHere are the mock analysis results from the system...`;
-      setMessages(prev => [...prev, { role: 'assistant', content: aiResponse }]);
+    try {
+      const beMode = mode === 'Internal' ? 'INTERNAL' : 'EXTERNAL';
+      const res = await chatbotApi.sendHRMessage(
+        currentSessionId, content, user.id, selectedPositionId, beMode
+      );
+      setMessages(prev => [...prev, { role: 'assistant', content: res.answer }]);
+    } catch {
+      antMessage.error('Failed to send message');
+      setMessages(prev => prev.slice(0, -1));
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   const handleKeyDown = (e) => {
-    // Submit on Enter, allow Shift+Enter for new line
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
   };
 
-  const handlePositionChange = (val) => {
-    if (val) {
-      navigate(`/hr/chatbot/${val}`);
-    } else {
-      navigate(`/hr/chatbot`);
-    }
-  };
+  // ── Derived ──
+  const selectedPosition = positionMap[selectedPositionId];
 
   return (
-    <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: '8px', overflow: 'hidden' }}>
-      {/* Left Sidebar: Chat History */}
-      <Sider width={250} theme="light" style={{ borderRight: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '16px', borderBottom: '1px solid #f0f0f0' }}>
-          <Button type="primary" icon={<PlusOutlined />} block>New Chat</Button>
-        </div>
-        <Menu
-          mode="inline"
-          defaultSelectedKeys={['1']}
-          style={{ borderRight: 'none', flex: 1, overflowY: 'auto' }}
-          items={mockSessions.map(session => ({
-            key: session.id,
-            label: session.title,
-          }))}
-        />
-      </Sider>
+    <>
+      <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: '8px', overflow: 'hidden' }}>
 
-      {/* Right Content: Chat Area */}
-      <Content style={{ display: 'flex', flexDirection: 'column' }}>
-        {/* Chat Header */}
-        <div style={{ padding: '16px 24px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
-          <Space>
-            <Title level={5} style={{ margin: 0 }}>AI HR Assistant</Title>
-            <Select 
-              allowClear
-              placeholder="Select Active Position"
-              style={{ width: 250, marginLeft: 16 }}
-              value={positionId ? parseInt(positionId) : null}
-              onChange={handlePositionChange}
-              options={activePositions?.map(p => ({ value: p.id, label: p.name })) || []}
+        {/* ── Left Sidebar ── */}
+        <Sider
+          width={260}
+          collapsedWidth={44}
+          collapsed={sidebarCollapsed}
+          theme="light"
+          style={{ borderRight: '1px solid #f0f0f0', overflow: 'hidden', transition: 'width 0.2s' }}
+        >
+          {/* Sidebar header: toggle + New Chat */}
+          <div style={{
+            padding: '12px 8px',
+            borderBottom: '1px solid #f0f0f0',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            overflow: 'hidden',
+          }}>
+            <Button
+              type="text"
+              icon={sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              style={{ flexShrink: 0 }}
             />
-          </Space>
-          <Segmented 
-            options={[
-              { label: 'Internal (HR Mode)', value: 'Internal' },
-              { label: 'External (Candidate Mode)', value: 'External' }
-            ]} 
-            value={mode}
-            onChange={setMode}
-          />
-        </div>
+            {!sidebarCollapsed && (
+              <Button type="primary" icon={<PlusOutlined />} block onClick={handleNewChatClick}>
+                New Chat
+              </Button>
+            )}
+          </div>
 
-        {/* Messages */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          {messages.map((msg, idx) => (
-            <div key={idx} style={{ 
-              display: 'flex', 
-              gap: '12px', 
-              flexDirection: msg.role === 'user' ? 'row-reverse' : 'row' 
-            }}>
-              <Avatar 
-                icon={msg.role === 'user' ? <UserOutlined /> : <RobotOutlined />} 
-                style={{ backgroundColor: msg.role === 'user' ? '#1677ff' : '#52c41a' }}
-              />
-              <div style={{
-                maxWidth: '70%',
-                padding: '12px 16px',
-                borderRadius: '8px',
-                backgroundColor: msg.role === 'user' ? '#e6f4ff' : '#f5f5f5',
-                border: msg.role === 'user' ? '1px solid #91caff' : '1px solid #d9d9d9',
-              }}>
-                <ReactMarkdown>{msg.content}</ReactMarkdown>
-              </div>
-            </div>
-          ))}
-          {isLoading && (
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <Avatar icon={<RobotOutlined />} style={{ backgroundColor: '#52c41a' }} />
-              <div style={{ padding: '12px', color: '#8c8c8c' }}>AI is thinking...</div>
+          {/* Session list — hidden when collapsed */}
+          {!sidebarCollapsed && (
+            <div style={{ overflowY: 'auto', height: 'calc(100% - 57px)' }}>
+              {sessions.length === 0 ? (
+                <div style={{ padding: '16px', color: '#8c8c8c', fontSize: 13 }}>
+                  {selectedPositionId ? 'No sessions yet.' : 'Select a position first.'}
+                </div>
+              ) : (
+                <Menu
+                  mode="inline"
+                  selectedKeys={currentSessionId ? [currentSessionId] : []}
+                  style={{ borderRight: 'none' }}
+                  items={sessions.map(s => ({
+                    key: s.sessionId,
+                    label: (
+                      <Tooltip title={getSessionTitle(s)} placement="right">
+                        <Text ellipsis style={{ fontSize: 13, maxWidth: 188, display: 'block' }}>
+                          {getSessionTitle(s)}
+                        </Text>
+                      </Tooltip>
+                    ),
+                    onClick: () => handleSelectSession(s),
+                  }))}
+                />
+              )}
             </div>
           )}
-          <div ref={messagesEndRef} />
-        </div>
+        </Sider>
 
-        {/* Input Area */}
-        <div style={{ padding: '16px 24px', borderTop: '1px solid #f0f0f0', background: '#fafafa' }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-            <Input.TextArea
-              autoSize={{ minRows: 2, maxRows: 6 }}
-              placeholder="Enter your prompt for AI (e.g. Filter top 5 candidates for this position...) | Shift + Enter for new line"
-              value={inputValue}
-              onChange={e => setInputValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              style={{ flex: 1 }}
-            />
-            <Button size="large" type="primary" icon={<SendOutlined />} onClick={handleSend} loading={isLoading} style={{ height: 'auto', padding: '10px 24px' }}>
-              Send
-            </Button>
+        {/* ── Right Content ── */}
+        <Content style={{ display: 'flex', flexDirection: 'column' }}>
+
+          {/* Header */}
+          <div style={{ padding: '16px 24px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <Space size={12} wrap>
+              <Title level={5} style={{ margin: 0 }}>AI HR Assistant</Title>
+              <Select
+                allowClear
+                placeholder="Select Position"
+                style={{ width: 260 }}
+                value={selectedPositionId}
+                onChange={handlePositionChange}
+                options={positions.map(p => ({ value: p.id, label: `${p.seniority} ${p.title}` }))}
+              />
+            </Space>
+            {/* Read-only mode tag — only shown when a session is active */}
+            {currentSessionId && (
+              <Tag
+                color={mode === 'Internal' ? 'geekblue' : 'orange'}
+                style={{ fontWeight: 600, fontSize: 13, padding: '3px 10px' }}
+              >
+                {mode}
+              </Tag>
+            )}
           </div>
+
+          {/* Messages */}
+          <div
+            ref={messagesContainerRef}
+            style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}
+          >
+            {/* Top sentinel — triggers infinite scroll up */}
+            <div ref={topSentinelRef} style={{ height: 1, flexShrink: 0 }} />
+
+            {loadingOlder && (
+              <div style={{ textAlign: 'center', padding: '4px 0' }}>
+                <Spin size="small" />
+              </div>
+            )}
+
+            {loadingHistory ? (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Spin size="large" />
+              </div>
+            ) : messages.length === 0 ? (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ textAlign: 'center', color: '#bfbfbf' }}>
+                  <RobotOutlined style={{ fontSize: 48, marginBottom: 16 }} />
+                  <div>Select a position and click <strong>New Chat</strong>, or resume a session from the sidebar.</div>
+                </div>
+              </div>
+            ) : (
+              messages.map((msg, idx) => (
+                <div
+                  key={msg.id ?? idx}
+                  style={{ display: 'flex', gap: '12px', flexDirection: msg.role === 'user' ? 'row-reverse' : 'row' }}
+                >
+                  <Avatar
+                    icon={msg.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
+                    style={{ backgroundColor: msg.role === 'user' ? '#1677ff' : '#52c41a', flexShrink: 0 }}
+                  />
+                  <div style={{
+                    maxWidth: '70%',
+                    padding: '12px 16px',
+                    borderRadius: '8px',
+                    backgroundColor: msg.role === 'user' ? '#e6f4ff' : '#f5f5f5',
+                    border: msg.role === 'user' ? '1px solid #91caff' : '1px solid #d9d9d9',
+                  }}>
+                    <ChatMarkdown>{msg.content}</ChatMarkdown>
+                  </div>
+                </div>
+              ))
+            )}
+
+            {isLoading && (
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <Avatar icon={<RobotOutlined />} style={{ backgroundColor: '#52c41a' }} />
+                <div style={{ padding: '12px', color: '#8c8c8c' }}>AI is thinking...</div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Input */}
+          <div style={{ padding: '16px 24px', borderTop: '1px solid #f0f0f0', background: '#fafafa' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+              <Input.TextArea
+                autoSize={{ minRows: 2, maxRows: 6 }}
+                placeholder={
+                  currentSessionId
+                    ? 'Enter your prompt... | Shift+Enter for new line'
+                    : 'Start a new chat session to begin'
+                }
+                value={inputValue}
+                onChange={e => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={!currentSessionId || isLoading}
+                style={{ flex: 1 }}
+              />
+              <Button
+                size="large"
+                type="primary"
+                icon={<SendOutlined />}
+                onClick={handleSend}
+                loading={isLoading}
+                disabled={!currentSessionId}
+                style={{ height: 'auto', padding: '10px 24px' }}
+              >
+                Send
+              </Button>
+            </div>
+          </div>
+        </Content>
+      </Layout>
+
+      {/* ── Mode Selection Modal ── */}
+      <Modal
+        title="Start New Chat"
+        open={showModeModal}
+        onOk={handleCreateSession}
+        onCancel={() => setShowModeModal(false)}
+        okText="Start Chat"
+        confirmLoading={creatingSession}
+        width={420}
+      >
+        <div style={{ padding: '16px 0' }}>
+          {selectedPosition && (
+            <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+              Position: <strong>{selectedPosition.seniority} {selectedPosition.title}</strong>
+            </Text>
+          )}
+          <Segmented
+
+            options={['Internal', 'External']}
+            value={modalMode}
+            onChange={setModalMode}
+          />
+          <Text type="secondary" style={{ marginTop: 12, display: 'block', fontSize: 13 }}>
+            {modalMode === 'Internal'
+              ? 'Search and analyze CVs uploaded by HR for this position.'
+              : 'Search and analyze CVs submitted by Candidates for this position.'}
+          </Text>
         </div>
-      </Content>
-    </Layout>
+      </Modal>
+    </>
   );
 };
 

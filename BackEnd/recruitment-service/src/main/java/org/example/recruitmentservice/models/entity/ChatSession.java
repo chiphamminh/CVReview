@@ -11,8 +11,10 @@ import org.example.recruitmentservice.models.enums.ChatbotType;
 import java.time.LocalDateTime;
 
 /**
- * Đại diện cho một phiên chat (session). Mỗi lần user bấm "New Chat" → 1 session mới.
- * Session_id được BE tạo (UUID) và trả về FE để FE đính kèm vào mọi request sau.
+ * Đại diện cho một phiên chat (session). Mỗi lần user bấm "New Chat" → 1
+ * session mới.
+ * Session_id được BE tạo (UUID) và trả về FE để FE đính kèm vào mọi request
+ * sau.
  */
 @Entity
 @Data
@@ -42,7 +44,8 @@ public class ChatSession {
     private Integer positionId;
 
     /**
-     * Mode làm việc của HR chatbot: HR_MODE (CV từ HR upload) hoặc CANDIDATE_MODE (CV từ Candidate nộp).
+     * Mode làm việc của HR chatbot: INTERNAL (CV từ HR upload) hoặc EXTERNAL (CV từ
+     * Candidate nộp).
      * NULL đối với Candidate chatbot.
      */
     @Column(name = "mode")
@@ -52,7 +55,9 @@ public class ChatSession {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
-    /** Cập nhật mỗi khi có message mới — dùng để sắp xếp danh sách sessions cho FE. */
+    /**
+     * Cập nhật mỗi khi có message mới — dùng để sắp xếp danh sách sessions cho FE.
+     */
     @Column(name = "last_active_at", nullable = false)
     private LocalDateTime lastActiveAt;
 }

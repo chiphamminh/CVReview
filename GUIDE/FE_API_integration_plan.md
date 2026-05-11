@@ -305,7 +305,7 @@ app.include_router(candidate_router, prefix="/chatbot/candidate")
 ```
 # Python chatbot-service (qua gateway /chatbot/**)
 POST /chatbot/hr/session
-Body:     { hr_id, position_id, mode: "HR_MODE" | "CANDIDATE_MODE" }
+Body:     { hr_id, position_id, mode: "INTERNAL" | "EXTERNAL" }
 Response: { session_id }
 
 POST /chatbot/hr/chat
@@ -363,7 +363,7 @@ export const chatbotApi = {
 
 ### Candidate Chatbot (embedded trong CareerPage)
 - Mỗi PositionCard có nút Chat → mở drawer chatbot
-- `chatbotApi.createCandidateSession(user.id, positionId)` khi open drawer
+- `chatbotApi.createCandidateSession(user.id)` khi open drawer. Scope cho Candidate chatbot là CV của candidate và positionId của các position active. 
 - Gửi message → `chatbotApi.sendCandidateMessage(...)`
 
 ---
