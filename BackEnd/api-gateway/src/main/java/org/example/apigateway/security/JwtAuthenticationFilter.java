@@ -87,11 +87,18 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
             System.out.println("JWT valid - Id: " + id + ", Phone: " + phone + ", Role: " + role);
 
-            // Kiểm tra phân quyền: Nếu route là của Admin, bắt buộc role phải là ADMIN
+            // Kiểm tra phân quyền theo prefix route
             if (path.startsWith("/admin") || path.startsWith("/api/admin") || path.startsWith("/auth/admin")) {
                 if (!"ADMIN".equalsIgnoreCase(role)) {
                     System.out.println("Access denied: Not an admin for path " + path);
-                    return onError(exchange, ErrorCode.FORBIDDEN); // Sử dụng lỗi liên quan như FORBIDDEN
+                    return onError(exchange, ErrorCode.FORBIDDEN);
+                }
+            }
+
+            if (path.startsWith("/hr")) {
+                if (!"HR".equalsIgnoreCase(role)) {
+                    System.out.println("Access denied: Not an HR user for path " + path);
+                    return onError(exchange, ErrorCode.FORBIDDEN);
                 }
             }
 

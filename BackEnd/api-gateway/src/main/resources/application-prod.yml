@@ -25,7 +25,7 @@ spring:
             - id: recruitment-service
               uri: ${RECRUITMENT_SERVICE_URL}
               predicates:
-                - Path=/positions/**,/cv/**,/upload/**,/analysis/**,/tracking/**,/chunking/**
+                - Path=/positions/**,/cv/**,/upload/**,/analysis/**,/tracking/**,/chunking/**,/hr/analytics/**,/hr/cvs/**
                 - Method=GET,POST,PUT,PATCH,DELETE
               filters:
                 - StripPrefix=0

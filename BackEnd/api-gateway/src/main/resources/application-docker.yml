@@ -25,7 +25,7 @@ spring:
             - id: recruitment-service
               uri: http://recruitment-service:8082  # Use service name in Docker
               predicates:
-                - Path=/positions/**,/cv/**,/upload/**,/analysis/**,/tracking/**,/chunking/**
+                - Path=/positions/**,/cv/**,/upload/**,/analysis/**,/tracking/**,/chunking/**,/hr/analytics/**,/hr/cvs/**
                 - Method=GET,POST,PUT,PATCH,DELETE
               filters:
                 - name: CircuitBreaker
