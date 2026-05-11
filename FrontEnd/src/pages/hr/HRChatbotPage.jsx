@@ -4,7 +4,7 @@ import {
   Segmented, Avatar, Select, Modal, Spin, Tooltip, Tag,
   message as antMessage,
 } from 'antd';
-import { SendOutlined, RobotOutlined, UserOutlined, PlusOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
+import { SendOutlined, RobotOutlined, UserOutlined, PlusOutlined, MenuFoldOutlined, MenuUnfoldOutlined, ReloadOutlined } from '@ant-design/icons';
 import ChatMarkdown from '@/components/chatbot/ChatMarkdown';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -356,15 +356,19 @@ const HRChatbotPage = () => {
                 options={positions.map(p => ({ value: p.id, label: `${p.seniority} ${p.title}` }))}
               />
             </Space>
-            {/* Read-only mode tag — only shown when a session is active */}
-            {currentSessionId && (
-              <Tag
-                color={mode === 'Internal' ? 'geekblue' : 'orange'}
-                style={{ fontWeight: 600, fontSize: 13, padding: '3px 10px' }}
-              >
-                {mode}
-              </Tag>
-            )}
+            <Space>
+              {currentSessionId && (
+                <Tag
+                  color={mode === 'Internal' ? 'geekblue' : 'orange'}
+                  style={{ fontWeight: 600, fontSize: 13, padding: '3px 10px' }}
+                >
+                  {mode}
+                </Tag>
+              )}
+              <Button icon={<ReloadOutlined />} onClick={loadSessions}>
+                Refresh
+              </Button>
+            </Space>
           </div>
 
           {/* Messages */}

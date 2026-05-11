@@ -18,7 +18,7 @@ const SendOfferModal = ({ open, onCancel, onSave, candidateData, loading }) => {
 
   const handleFinish = (values) => {
     onSave({
-      startDate: values.startDate.format('YYYY-MM-DD'),
+      startDate: values.startDate.format('YYYY-MM-DD HH:mm'),
       expirationDate: values.expirationDate?.format('YYYY-MM-DD'),
       files: fileList,
     });
@@ -50,8 +50,9 @@ const SendOfferModal = ({ open, onCancel, onSave, candidateData, loading }) => {
           rules={[{ required: true, message: 'Please select start date' }]}
         >
           <DatePicker
+            showTime
+            format="YYYY-MM-DD HH:mm"
             style={{ width: '100%' }}
-            format="YYYY-MM-DD"
             disabledDate={(current) => current && current < dayjs().startOf('day')}
           />
         </Form.Item>

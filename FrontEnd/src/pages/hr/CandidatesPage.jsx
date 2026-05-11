@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Button, Space, Input, Select, Typography, Dropdown, Tooltip, message, Modal, Tag } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { SearchOutlined, EyeOutlined, FileTextOutlined, DownOutlined, EditOutlined, FilterOutlined } from '@ant-design/icons';
+import { SearchOutlined, EyeOutlined, FileTextOutlined, DownOutlined, EditOutlined, FilterOutlined, ReloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useSearchParams } from 'react-router-dom';
 
@@ -48,7 +48,7 @@ const CandidatesPage = () => {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  const { data: candidatePage, isLoading: isCandLoading } = useQuery({
+  const { data: candidatePage, isLoading: isCandLoading, isFetching: isCandFetching, refetch: refetchCandidates } = useQuery({
     queryKey: ['candidates', { keyword, stageFilter, positionFilter, typeFilter, page, pageSize }],
     queryFn: () => candidateApi.filter({
       keyword: keyword || undefined,
@@ -309,6 +309,9 @@ const CandidatesPage = () => {
         />
         <Button icon={<FilterOutlined />} onClick={clearAllFilters} danger type="dashed">
           Clear All
+        </Button>
+        <Button icon={<ReloadOutlined />} onClick={() => refetchCandidates()} loading={isCandFetching} style={{ marginLeft: 'auto' }}>
+          Refresh
         </Button>
       </div>
 

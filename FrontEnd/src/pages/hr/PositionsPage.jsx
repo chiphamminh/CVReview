@@ -13,7 +13,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   PlusOutlined, FileTextOutlined, RobotOutlined,
   EditOutlined, DeleteOutlined, SearchOutlined, UploadOutlined,
-  LinkOutlined, SyncOutlined, CheckCircleOutlined, ExclamationCircleOutlined,
+  LinkOutlined, SyncOutlined, CheckCircleOutlined, ExclamationCircleOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import ReactMarkdown from 'react-markdown';
@@ -71,7 +71,7 @@ const PositionsPage = () => {
 
   const isActive = statusFilter === 'active' ? true : statusFilter === 'closed' ? false : undefined;
 
-  const { data: positionsData, isLoading } = useQuery({
+  const { data: positionsData, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['positions', { keyword, isActive, page }],
     queryFn: () => positionApi.filter({ keyword: keyword || undefined, isActive, page, size: PAGE_SIZE }),
   });
@@ -439,8 +439,8 @@ const PositionsPage = () => {
   return (
     <div>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>Positions Management</Title>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, marginRight: 10, marginTop: 10 }}>
+        <Title level={4} style={{ margin: '10px 0 0 10px' }}>Positions Management</Title>
         <Button
           type="primary"
           icon={<PlusOutlined />}
@@ -451,7 +451,7 @@ const PositionsPage = () => {
       </div>
 
       {/* Filters */}
-      <Row gutter={16} style={{ marginBottom: 16 }}>
+      <Row gutter={16} style={{ marginBottom: 16 }} align="middle">
         <Col span={10}>
           <Input
             placeholder="Search by title, seniority, or skills..."
@@ -472,6 +472,11 @@ const PositionsPage = () => {
             <Option value="active">Active</Option>
             <Option value="closed">Closed</Option>
           </Select>
+        </Col>
+        <Col flex="auto" style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>
+            Refresh
+          </Button>
         </Col>
       </Row>
 
