@@ -61,16 +61,26 @@ const HRDashboardPage = () => {
   };
 
   // ── Score Distribution chart config ──────────────────────────────────────
+  const maxBucketCount = Math.max(...buckets.map((b) => b.count), 1);
   const columnConfig = {
     data: buckets,
     xField: 'range',
     yField: 'count',
     colorField: 'range',
-    scale: { color: { range: SCORE_COLORS } },
+    scale: {
+      color: { range: SCORE_COLORS },
+      // Force integer-only ticks on Y axis by restricting domain to whole numbers
+      y: { domainMax: maxBucketCount, tickCount: Math.min(maxBucketCount + 1, 6), nice: false },
+    },
     label: { text: 'count', position: 'top', style: { fill: '#595959', fontSize: 12 } },
     axis: {
       x: { title: 'Score Range', titleFill: '#8c8c8c' },
-      y: { title: 'Number of CVs', titleFill: '#8c8c8c' },
+      y: {
+        title: 'Number of CVs',
+        titleFill: '#8c8c8c',
+        // Filter out any non-integer ticks that G2 might still compute
+        tickFilter: (tick) => Number.isInteger(tick),
+      },
     },
     tooltip: { items: [{ field: 'label', name: 'Level' }, { field: 'count', name: 'CVs' }] },
     autoFit: true,
@@ -159,9 +169,9 @@ const HRDashboardPage = () => {
         </Space>
       </div>
 
-      {/* KPI Cards */}
+      {/* KPI Cards — display:flex on each Col so all cards stretch to the same height */}
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col xs={24} sm={12} xl={6}>
+        <Col xs={24} sm={12} xl={6} style={{ display: 'flex' }}>
           <KPICard
             icon={<FileDoneOutlined />}
             iconColor="#1677ff"
@@ -170,7 +180,7 @@ const HRDashboardPage = () => {
             loading={isKpiLoading}
           />
         </Col>
-        <Col xs={24} sm={12} xl={6}>
+        <Col xs={24} sm={12} xl={6} style={{ display: 'flex' }}>
           <KPICard
             icon={<StarOutlined />}
             iconColor="#faad14"
@@ -181,7 +191,7 @@ const HRDashboardPage = () => {
             loading={isKpiLoading}
           />
         </Col>
-        <Col xs={24} sm={12} xl={6}>
+        <Col xs={24} sm={12} xl={6} style={{ display: 'flex' }}>
           <KPICard
             icon={<ClockCircleOutlined />}
             iconColor="#722ed1"
@@ -192,7 +202,7 @@ const HRDashboardPage = () => {
             loading={isKpiLoading}
           />
         </Col>
-        <Col xs={24} sm={12} xl={6}>
+        <Col xs={24} sm={12} xl={6} style={{ display: 'flex' }}>
           <KPICard
             icon={<CheckCircleOutlined />}
             iconColor="#52c41a"

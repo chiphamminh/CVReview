@@ -10,7 +10,7 @@ const KPICard = ({ icon, iconColor, title, value, suffix, note, loading, precisi
       : value;
 
   return (
-    <Card loading={loading} styles={{ body: { padding: '20px 24px' } }}>
+    <Card loading={loading} styles={{ body: { padding: '20px 24px' } }} style={{ width: '100%', height: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
         <div
           style={{
