@@ -103,6 +103,15 @@ def build_hr_prompts_node(state: HRChatState) -> HRChatState:
     if sql_text:
         user_prompt += f"\n## Application Records from Database:\n{sql_text}\n"
 
+    # F13: inject ranked candidate reference so LLM can resolve "người thứ 2"
+    ranked_cv_list = state.get("ranked_cv_list") or []
+    if ranked_cv_list:
+        ordinal_lines = "\n".join(
+            f"  - Rank {r['rank']}: {r['name']} (cvId={r['cvId']})"
+            for r in ranked_cv_list
+        )
+        user_prompt += f"\n## Ranked Candidates (use for ordinal references like 'người thứ 2'):\n{ordinal_lines}\n"
+
     user_prompt += f"\n## HR Question:\n{state['query']}"
 
     state["system_prompt"] = system_prompt

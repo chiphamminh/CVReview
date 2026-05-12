@@ -65,7 +65,7 @@ async def _dense_search(
     Dense vector search using the expanded query.
     embedding_service.embed_text is CPU-bound — run in executor to avoid blocking.
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     query_vector = await loop.run_in_executor(
         None, lambda: embedding_service.embed_text(query_text, is_query=True)
     )
@@ -231,8 +231,8 @@ async def hybrid_retrieve_cv(
             capped.append(doc)
             cv_chunk_count[cv_id] = cv_chunk_count.get(cv_id, 0) + 1
 
-    # Cross-encoder rerank — group by cvId, keep top_n unique CVs
-    reranked = reranker.rerank_and_group(
+    # Cross-encoder rerank — run in executor to avoid blocking the event loop
+    reranked = await reranker.rerank_and_group_async(
         query=query,
         chunks=capped,
         id_field="cvId",

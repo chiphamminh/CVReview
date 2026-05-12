@@ -49,9 +49,16 @@ class HRChatState(TypedDict):
     final_answer: str
     metadata: Dict[str, Any]
 
-    # --- NEW FIELDS FOR REFACTOR SPRINT 1 ---
-    pipeline_strategy: str          # "SEMANTIC"|"COMPARE"|"FILTER"|"ACTION"|"AGGREGATE"|"FIND_MORE"
-    query_intent: str               # "RANK"|"COMPARE"|"DETAIL"|"ACTION"|"AGGREGATE"|"FILTER"|"FIND_MORE"
-    query_entities: Dict            # extracted entities: skill_keywords, score_threshold, top_n, candidate_names
-    expanded_query: Optional[str]   # output của LLM expansion
-    skill_variants: List[str]       # expanded skill list cho keyword search
+    # Routing & expansion
+    pipeline_strategy: str          # RANK|FILTER|FIND_MORE|COMPARE|DETAIL|ACTION|AGGREGATE
+    query_intent: str
+    query_entities: Dict            # skill_keywords, score_threshold, top_n, resolved_cv_id
+    expanded_query: Optional[str]
+    skill_variants: List[str]
+
+    # F12 — Conversation state machine
+    conv_state: str                         # "IDLE" | "AWAITING_CONFIRM"
+    pending_action: Optional[str]           # e.g. "SEND_INTERVIEW" when awaiting confirm
+
+    # F13 — Ranked candidate list for ordinal resolution ("người thứ 2" → cvId)
+    ranked_cv_list: Optional[List[Dict[str, Any]]]  # [{"rank":1,"cvId":12,"name":"Nguyen A"}]

@@ -42,6 +42,16 @@ async def query_expansion_node(state: CandidateChatState) -> CandidateChatState:
         print(f"[Candidate Expansion] strategy={strategy} → skipped")
         return state
 
+    # F9: Skip expansion for follow-up JD_SEARCH turns — scored_jobs cache exists,
+    # no new skill keywords in query, and query is short (conversational follow-up).
+    scored_jobs = state.get("scored_jobs")
+    has_new_skills = len(skill_keywords) > 0
+    if scored_jobs and not has_new_skills and len(query.split()) <= 12:
+        state["expanded_query"] = query
+        state["skill_variants"] = skill_keywords
+        print("[Candidate Expansion] Follow-up skip (cache hit + no new skills) → passthrough")
+        return state
+
     print(f"[Candidate Expansion] strategy={strategy} | keywords={skill_keywords} → calling LLM")
     expanded_query, skill_variants = await expand_query(query, skill_keywords)
 

@@ -14,33 +14,40 @@ async def save_hr_turn_node(state: HRChatState) -> HRChatState:
         raw_calls      = state.get("function_calls")
         pending_emails = state.get("pending_emails")
         active_cv_ids  = state.get("active_cv_ids") or []
+        ranked_cv_list = state.get("ranked_cv_list") or []
+        conv_state     = state.get("conv_state", "IDLE")
+        pending_action = state.get("pending_action")
+
+        # Build the session cache dict — always written so session node can restore
+        # conv_state, ranked_cv_list, and active_cv_ids on the next turn.
+        def _base_cache() -> dict:
+            cache: dict = {"conv_state": conv_state}
+            if active_cv_ids:
+                cache["active_cv_ids"] = active_cv_ids
+            if ranked_cv_list:
+                cache["ranked_cv_list"] = ranked_cv_list
+            if pending_action:
+                cache["pending_action"] = pending_action
+            return cache
 
         if raw_calls:
-            # ISSUE-01: embed active_cv_ids into the function_call payload so it
-            # survives session reload and can be restored on the next turn.
             payload_dict = (
                 raw_calls if isinstance(raw_calls, dict)
                 else {"calls": raw_calls}
             )
-            payload_dict["active_cv_ids"] = active_cv_ids
+            payload_dict.update(_base_cache())
             function_call_payload: Optional[str] = json.dumps(payload_dict, ensure_ascii=False)
         elif pending_emails:
             import uuid
-            # ISSUE-05: Tạo action_id cho mỗi lần có pending emails
             action_id = str(uuid.uuid4())
             for pe in pending_emails:
                 pe["_action_id"] = action_id
-            
-            cache: dict = {"pending_emails": pending_emails}
-            if active_cv_ids:
-                cache["active_cv_ids"] = active_cv_ids
+            cache = _base_cache()
+            cache["pending_emails"] = pending_emails
             function_call_payload = json.dumps(cache, ensure_ascii=False)
-        elif active_cv_ids:
-            function_call_payload = json.dumps(
-                {"active_cv_ids": active_cv_ids}, ensure_ascii=False
-            )
         else:
-            function_call_payload = None
+            cache = _base_cache()
+            function_call_payload = json.dumps(cache, ensure_ascii=False) if cache else None
 
         await recruitment_api.save_message(
             session_id=state["session_id"],

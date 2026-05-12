@@ -37,10 +37,18 @@ async def load_hr_session_history_node(state: HRChatState) -> HRChatState:
                         if "pending_emails" in func_data:
                             state["pending_emails"] = func_data["pending_emails"]
                             print(f"[Cache Hit] Restored {len(state['pending_emails'])} pending_email(s)")
-                        # ISSUE-01: restore active_cv_ids so follow-up COMPARE/DETAIL can pin-fetch
                         if "active_cv_ids" in func_data:
                             state["active_cv_ids"] = func_data["active_cv_ids"]
                             print(f"[Cache Hit] Restored active_cv_ids: {state['active_cv_ids']}")
+                        # F12: restore explicit conversation state
+                        if "conv_state" in func_data:
+                            state["conv_state"] = func_data["conv_state"]
+                        if "pending_action" in func_data:
+                            state["pending_action"] = func_data["pending_action"]
+                        # F13: restore ranked list for ordinal resolution
+                        if "ranked_cv_list" in func_data:
+                            state["ranked_cv_list"] = func_data["ranked_cv_list"]
+                            print(f"[Cache Hit] Restored ranked_cv_list: {len(state['ranked_cv_list'])} entries")
                     except json.JSONDecodeError:
                         pass
                 break

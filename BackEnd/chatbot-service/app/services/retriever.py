@@ -1,5 +1,5 @@
 import asyncio
-from typing import List, Dict, Any, Optional, Literal
+from typing import Dict, List, Any, Optional, Literal
 from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
 from app.services.embedding import embedding_service
 from app.services.qdrant import qdrant_service
@@ -7,6 +7,10 @@ from app.services.reranker import reranker
 from app.config import get_settings
 
 settings = get_settings()
+
+# JD ranking-vector cache: positionId → pre-computed dense vector.
+# Avoids re-embedding the same JD on every HR query for the same position.
+_JD_RANKING_CACHE: Dict[int, List[float]] = {}
 
 # ---------------------------------------------------------------------------
 # Retrieval fetch multiplier: fetch (N * RERANK_FETCH_MULTIPLIER) chunks from
@@ -197,34 +201,36 @@ class CareerCounselorRetriever:
 
         print(f"[Retrieval] CV threshold: {cv_threshold:.2f}, JD threshold: {jd_threshold:.2f}")
 
-        # --- CV filter (no reranking needed — already scoped to 1 candidate) ---
+        # --- Build filters ---
         cv_must = [FieldCondition(key="is_latest", match=MatchValue(value=True))]
         if cv_id:
             cv_must.append(FieldCondition(key="cvId", match=MatchValue(value=cv_id)))
         elif candidate_id:
             cv_must.append(FieldCondition(key="candidateId", match=MatchValue(value=candidate_id)))
-        cv_results = self.qdrant_service.search_similar(
-            collection_name=self.cv_collection,
-            query_vector=query_vector,
-            limit=cv_top_k,
-            score_threshold=cv_threshold,
-            filters=Filter(must=cv_must),
-        )
 
-        # --- JD filter: over-fetch then rerank → group by positionId ---
         jd_fetch_limit = _rerank_fetch_limit(jd_top_k)
         jd_must = []
         if active_jd_ids is not None:
             jd_must.append(FieldCondition(key="positionId", match=MatchAny(any=active_jd_ids)))
-            
         jd_filter = Filter(must=jd_must) if jd_must else None
 
-        jd_chunks = self.qdrant_service.search_similar(
-            collection_name=self.jd_collection,
-            query_vector=query_vector,
-            limit=jd_fetch_limit,
-            score_threshold=jd_threshold,
-            filters=jd_filter,
+        # --- Run CV and JD Qdrant searches concurrently ---
+        loop = asyncio.get_running_loop()
+        cv_results, jd_chunks = await asyncio.gather(
+            loop.run_in_executor(None, lambda: self.qdrant_service.search_similar(
+                collection_name=self.cv_collection,
+                query_vector=query_vector,
+                limit=cv_top_k,
+                score_threshold=cv_threshold,
+                filters=Filter(must=cv_must),
+            )),
+            loop.run_in_executor(None, lambda: self.qdrant_service.search_similar(
+                collection_name=self.jd_collection,
+                query_vector=query_vector,
+                limit=jd_fetch_limit,
+                score_threshold=jd_threshold,
+                filters=jd_filter,
+            )),
         )
 
         jd_results = await reranker.rerank_and_group_async(
@@ -381,28 +387,36 @@ class CareerCounselorRetriever:
         fetch_limit = _rerank_fetch_limit(top_n)
         print(f"[HR Mode] position_id={position_id}, top_n={top_n}, fetch_limit={fetch_limit}")
 
-        # Step 1: Fetch JD chunks for this position to use as the ranking signal.
-        # We embed the JD text so that CV chunks are ranked by skill-match, not by
-        # how similar they are to the HR's conversational query.
-        jd_chunks_for_vector = self.qdrant_service.search_similar(
-            collection_name=self.jd_collection,
-            query_vector=await self._embed_async(query),
-            limit=5,
-            score_threshold=0.0,
-            filters=Filter(must=[FieldCondition(key="positionId", match=MatchValue(value=position_id))]),
-        )
-
-        if jd_chunks_for_vector:
-            # Concatenate JD chunk texts to build a rich ranking signal
-            jd_text_for_search = " ".join(
-                get_chunk_text(c.get("payload", {})) for c in jd_chunks_for_vector
-            ).strip()
-            ranking_vector = await self._embed_async(jd_text_for_search)
-            print(f"[HR Mode] Using JD-driven vector for CV ranking ({len(jd_chunks_for_vector)} JD chunks)")
+        # Step 1: Resolve JD ranking vector (cached per positionId to avoid re-embedding).
+        if position_id in _JD_RANKING_CACHE:
+            ranking_vector = _JD_RANKING_CACHE[position_id]
+            jd_chunks_for_vector = self.qdrant_service.search_similar(
+                collection_name=self.jd_collection,
+                query_vector=ranking_vector,
+                limit=5,
+                score_threshold=0.0,
+                filters=Filter(must=[FieldCondition(key="positionId", match=MatchValue(value=position_id))]),
+            )
+            print(f"[HR Mode] JD vector cache hit for position_id={position_id}")
         else:
-            # Fallback: use HR query if no JD is indexed yet
-            ranking_vector = await self._embed_async(query)
-            print("[HR Mode] No JD chunks found — falling back to query vector for CV ranking")
+            jd_chunks_for_vector = self.qdrant_service.search_similar(
+                collection_name=self.jd_collection,
+                query_vector=await self._embed_async(query),
+                limit=5,
+                score_threshold=0.0,
+                filters=Filter(must=[FieldCondition(key="positionId", match=MatchValue(value=position_id))]),
+            )
+
+            if jd_chunks_for_vector:
+                jd_text_for_search = " ".join(
+                    get_chunk_text(c.get("payload", {})) for c in jd_chunks_for_vector
+                ).strip()
+                ranking_vector = await self._embed_async(jd_text_for_search)
+                _JD_RANKING_CACHE[position_id] = ranking_vector
+                print(f"[HR Mode] JD vector computed and cached for position_id={position_id}")
+            else:
+                ranking_vector = await self._embed_async(query)
+                print("[HR Mode] No JD chunks found — falling back to query vector for CV ranking")
 
         # Step 2: Fetch CV chunks using the JD vector
         cv_chunks = self.qdrant_service.search_similar(

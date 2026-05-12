@@ -15,6 +15,7 @@ Strategy routing:
   FIND_MORE → hybrid retrieval, exclude active_cv_ids via Qdrant must_not
 """
 
+import asyncio
 from typing import List, Dict, Any, Optional
 
 from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
@@ -23,7 +24,6 @@ from app.rag.hr.state import HRChatState
 from app.rag.hr.router import _extract_top_n
 from app.rag.shared.hybrid_retrieval import hybrid_retrieve_cv
 from app.services.retriever import retriever
-from app.services.embedding import embedding_service
 from app.config import get_settings
 from app.rag.hr.helpers.cv_assembler import assemble_virtual_full_cv
 
@@ -103,17 +103,26 @@ def _build_candidate_base_filters(position_id: int) -> List:
 
 async def _fetch_jd_context(
     position_id: int,
-    query_vector: List[float],
+    query: str,
 ) -> List[Dict[str, Any]]:
-    """Fetch top JD chunks for the given position to inject into prompt context."""
-    return retriever.qdrant_service.search_similar(
-        collection_name=retriever.jd_collection,
-        query_vector=query_vector,
-        limit=3,
-        score_threshold=0.0,
-        filters=Filter(must=[
-            FieldCondition(key="positionId", match=MatchValue(value=position_id))
-        ]),
+    """Fetch top JD chunks for the given position.
+
+    Embeds the query internally so this coroutine is self-contained and can
+    run concurrently with hybrid_retrieve_cv via asyncio.gather.
+    """
+    query_vector = await retriever._embed_async(query)
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: retriever.qdrant_service.search_similar(
+            collection_name=retriever.jd_collection,
+            query_vector=query_vector,
+            limit=3,
+            score_threshold=0.0,
+            filters=Filter(must=[
+                FieldCondition(key="positionId", match=MatchValue(value=position_id))
+            ]),
+        ),
     )
 
 
@@ -194,19 +203,19 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
     else:
         base_filters = _build_candidate_base_filters(position_id)
 
-    # ---- HYBRID RETRIEVAL (dense + keyword → RRF → cross-encoder rerank) ----
-    cv_results = await hybrid_retrieve_cv(
-        query=expanded_query,
-        skill_variants=skill_variants,
-        base_filters=base_filters,
-        top_n=top_n,
-        exclude_cv_ids=exclude_ids if exclude_ids else None,
+    # ---- HYBRID RETRIEVAL + JD fetch — run concurrently ----
+    # hybrid_retrieve_cv uses expanded_query for better CV recall.
+    # _fetch_jd_context uses the original query for prompt-relevance (not expansion).
+    cv_results, jd_results = await asyncio.gather(
+        hybrid_retrieve_cv(
+            query=expanded_query,
+            skill_variants=skill_variants,
+            base_filters=base_filters,
+            top_n=top_n,
+            exclude_cv_ids=exclude_ids if exclude_ids else None,
+        ),
+        _fetch_jd_context(position_id, query),
     )
-
-    # Fetch JD context using the ORIGINAL query vector (not expanded) for prompt relevance.
-    # Expansion is tuned for CV recall; original query stays closer to JD section topics.
-    query_vector = embedding_service.embed_text(query, is_query=True)
-    jd_results   = await _fetch_jd_context(position_id, query_vector)
 
     state["cv_context"] = cv_results
     state["jd_context"] = jd_results
@@ -233,6 +242,12 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
                     break
         
         state["active_cv_ids"] = deduped_ids
+        # F13: build ranked list with names for ordinal resolution ("người thứ 2")
+        cv_id_to_meta = state.get("cv_id_to_meta", {})
+        state["ranked_cv_list"] = [
+            {"rank": i + 1, "cvId": cid, "name": cv_id_to_meta.get(cid, {}).get("candidateName", f"CV-{cid}")}
+            for i, cid in enumerate(deduped_ids)
+        ]
         print(f"[HR Retrieve] active_cv_ids set to top-{requested_n}: {deduped_ids}")
     else:
         new_ids = [

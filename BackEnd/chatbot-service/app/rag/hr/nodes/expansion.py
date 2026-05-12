@@ -43,10 +43,17 @@ async def query_expansion_node(state: HRChatState) -> HRChatState:
     skill_keywords: List[str] = state.get("query_entities", {}).get("skill_keywords", [])
 
     if strategy not in _EXPANSION_STRATEGIES:
-        # Passthrough — downstream nodes always have these fields populated
         state["expanded_query"] = query
         state["skill_variants"] = skill_keywords
         print(f"[HR Expansion] strategy={strategy} → skipped (not in expansion strategies)")
+        return state
+
+    # F8: Skip expansion for simple queries — short query with explicit skill keywords
+    # already provides a precise signal; LLM synonyms add noise more than recall.
+    if len(query.split()) <= 5 and len(skill_keywords) >= 1:
+        state["expanded_query"] = query
+        state["skill_variants"] = skill_keywords
+        print(f"[HR Expansion] Simple query skip (≤5 words + skills) → passthrough")
         return state
 
     print(f"[HR Expansion] strategy={strategy} | keywords={skill_keywords} → calling LLM")

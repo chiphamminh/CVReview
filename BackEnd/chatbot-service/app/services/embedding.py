@@ -1,9 +1,14 @@
+from collections import OrderedDict
+from typing import List, Optional, Tuple
 from sentence_transformers import SentenceTransformer
-from typing import List, Optional
-import numpy as np
 from app.config import get_settings
 
 settings = get_settings()
+
+# Module-level LRU cache for query/text embeddings.
+# Key: (text[:300], is_query) — 512 entries covers typical session diversity.
+_EMBED_CACHE: "OrderedDict[Tuple[str, bool], List[float]]" = OrderedDict()
+_EMBED_CACHE_MAX = 512
 
 
 class EmbeddingService:
@@ -27,26 +32,21 @@ class EmbeddingService:
             print(f"Model loaded successfully! Dimension: {settings.EMBEDDING_DIMENSION}")
     
     def embed_text(self, text: str, is_query: bool = False) -> List[float]:
-        """
-        Embed a single text
-        
-        Args:
-            text: Text to embed
-            
-        Returns:
-            List of floats representing the embedding vector
-        """
+        """Embed a single text with LRU cache to avoid redundant model calls."""
+        cache_key: Tuple[str, bool] = (text[:300], is_query)
+        if cache_key in _EMBED_CACHE:
+            _EMBED_CACHE.move_to_end(cache_key)
+            return _EMBED_CACHE[cache_key]
+
         self._load_model()
+        full_text = (self.QUERY_INSTRUCTION + text) if is_query else text
+        embedding = self._model.encode(full_text, convert_to_numpy=True, normalize_embeddings=True)
+        result: List[float] = embedding.tolist()
 
-        if is_query:
-            text = self.QUERY_INSTRUCTION + text
-
-        embedding = self._model.encode(
-            text, 
-            convert_to_numpy=True,
-            normalize_embeddings=True 
-        )
-        return embedding.tolist()
+        _EMBED_CACHE[cache_key] = result
+        if len(_EMBED_CACHE) > _EMBED_CACHE_MAX:
+            _EMBED_CACHE.popitem(last=False)
+        return result
     
     def embed_batch(
         self, 

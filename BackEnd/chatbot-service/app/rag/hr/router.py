@@ -28,10 +28,18 @@ from app.rag.hr.state import HRChatState
 # Compiled regex patterns — ordered from specific to broad
 # ---------------------------------------------------------------------------
 
-_EMAIL_CONFIRM_PATTERN = re.compile(
-    r"\b(đồng ý|đồng y|xác nhận|xac nhan|confirm|yes|gửi đi|gui di|ok|okay|send it|chắc chắn)\b",
+# Layer 0 — State machine patterns (checked before any other routing)
+_CONFIRM_PATTERN = re.compile(
+    r"^(ok|yes|đúng|đồng ý|đồng y|xác nhận|xac nhan|gửi đi|gui di|okay|send it|chắc chắn|được|ừ|sure|confirm)[\s!.]*$",
     re.IGNORECASE,
 )
+_REJECT_PATTERN = re.compile(
+    r"^(không|khong|no|thôi|thoi|hủy|huy|cancel|dừng|dung|bỏ qua|bo qua|đừng|dung gui)[\s!.]*$",
+    re.IGNORECASE,
+)
+
+# Keep for backward compat — used in legacy paths
+_EMAIL_CONFIRM_PATTERN = _CONFIRM_PATTERN
 
 _COMPARE_PATTERN = re.compile(
     r"\b(so sánh|so sanh|compare|đối chiếu|doi chieu|khác nhau|khac nhau|điểm khác|diem khac|versus|vs\.?)\b",
@@ -153,15 +161,32 @@ def route_hr_intent_node(state: HRChatState) -> HRChatState:
     Classify HR query into a pipeline_strategy and extract structured entities.
     Writes `pipeline_strategy`, `query_intent`, and `query_entities` to state.
     """
-    query         = state["query"]
-    active_cv_ids = state.get("active_cv_ids") or []
+    query          = state["query"].strip()
+    active_cv_ids  = state.get("active_cv_ids") or []
     pending_emails = state.get("pending_emails")
 
-    # Priority 1a — Confirm pending email (session state shortcut)
-    if pending_emails and _EMAIL_CONFIRM_PATTERN.search(query):
-        strategy = "ACTION"
-        intent   = "ACTION"
-        print(f"[Router] P1a → ACTION(confirm_email) | pending={len(pending_emails)}")
+    # -----------------------------------------------------------------------
+    # Layer 0 — State machine: AWAITING_CONFIRM takes priority over all else.
+    # Handles email confirmation and its rejection explicitly.
+    # -----------------------------------------------------------------------
+    if pending_emails:
+        if _CONFIRM_PATTERN.match(query):
+            strategy = "ACTION"
+            intent   = "ACTION"
+            print(f"[Router] L0 → ACTION(confirm) | pending={len(pending_emails)}")
+        elif _REJECT_PATTERN.match(query):
+            # HR cancelled — clear pending state and reset to default ranking
+            state["pending_emails"] = None
+            state["conv_state"]     = "IDLE"
+            state["pending_action"] = None
+            strategy = "RANK"
+            intent   = "RANK"
+            print("[Router] L0 → RANK (confirmation rejected — pending_emails cleared)")
+        else:
+            # Unrelated message while waiting — keep pending and route normally
+            strategy = "ACTION"
+            intent   = "ACTION"
+            print(f"[Router] L0 → ACTION (mid-confirm message, re-parse pending)")
 
     # Priority 1b — Compare previously surfaced candidates
     elif active_cv_ids and _COMPARE_PATTERN.search(query):
@@ -205,8 +230,10 @@ def route_hr_intent_node(state: HRChatState) -> HRChatState:
         intent   = "RANK"
         print(f"[Router] P3b → RANK (default)")
 
+    entities = _extract_query_entities(query)
+
     state["pipeline_strategy"] = strategy
     state["query_intent"]      = intent
-    state["query_entities"]    = _extract_query_entities(query)
+    state["query_entities"]    = entities
 
     return state
