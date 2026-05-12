@@ -1,3 +1,4 @@
+import asyncio
 from typing import List, Dict, Any, Optional, Literal
 from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
 from app.services.embedding import embedding_service
@@ -87,6 +88,13 @@ class CareerCounselorRetriever:
         self.cv_collection = settings.CV_COLLECTION_NAME
         self.jd_collection = settings.JD_COLLECTION_NAME
 
+    async def _embed_async(self, text: str, is_query: bool = True) -> List[float]:
+        """Run embed_text in a thread pool to avoid blocking the event loop."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, lambda: self.embedding_service.embed_text(text, is_query=is_query)
+        )
+
     async def retrieve_for_intent(
         self,
         query: str,
@@ -100,7 +108,7 @@ class CareerCounselorRetriever:
         skill_variants: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Candidate Chatbot: intent-based retrieval with adaptive parameters."""
-        query_vector = self.embedding_service.embed_text(query, is_query=True)
+        query_vector = await self._embed_async(query)
         query_length = len(query.split())
 
         if top_k is None:
@@ -219,7 +227,7 @@ class CareerCounselorRetriever:
             filters=jd_filter,
         )
 
-        jd_results = reranker.rerank_and_group(
+        jd_results = await reranker.rerank_and_group_async(
             query=query,
             chunks=jd_chunks,
             id_field="positionId",
@@ -378,7 +386,7 @@ class CareerCounselorRetriever:
         # how similar they are to the HR's conversational query.
         jd_chunks_for_vector = self.qdrant_service.search_similar(
             collection_name=self.jd_collection,
-            query_vector=self.embedding_service.embed_text(query, is_query=True),
+            query_vector=await self._embed_async(query),
             limit=5,
             score_threshold=0.0,
             filters=Filter(must=[FieldCondition(key="positionId", match=MatchValue(value=position_id))]),
@@ -389,11 +397,11 @@ class CareerCounselorRetriever:
             jd_text_for_search = " ".join(
                 get_chunk_text(c.get("payload", {})) for c in jd_chunks_for_vector
             ).strip()
-            ranking_vector = self.embedding_service.embed_text(jd_text_for_search, is_query=True)
+            ranking_vector = await self._embed_async(jd_text_for_search)
             print(f"[HR Mode] Using JD-driven vector for CV ranking ({len(jd_chunks_for_vector)} JD chunks)")
         else:
             # Fallback: use HR query if no JD is indexed yet
-            ranking_vector = self.embedding_service.embed_text(query, is_query=True)
+            ranking_vector = await self._embed_async(query)
             print("[HR Mode] No JD chunks found — falling back to query vector for CV ranking")
 
         # Step 2: Fetch CV chunks using the JD vector
@@ -410,7 +418,7 @@ class CareerCounselorRetriever:
         )
 
         # Step 3: Rerank with HR's actual query for conversational relevance
-        cv_results = reranker.rerank_and_group(
+        cv_results = await reranker.rerank_and_group_async(
             query=query,
             chunks=cv_chunks,
             id_field="cvId",
@@ -458,7 +466,7 @@ class CareerCounselorRetriever:
         Args:
             top_n: Number of unique candidate CVs to return. Parsed dynamically from HR's query.
         """
-        query_vector = self.embedding_service.embed_text(query, is_query=True)
+        query_vector = await self._embed_async(query)
         threshold = score_threshold if score_threshold is not None else get_adaptive_threshold("hr_candidate", True)
         fetch_limit = _rerank_fetch_limit(top_n)
 
@@ -476,7 +484,7 @@ class CareerCounselorRetriever:
             ]),
         )
 
-        cv_results = reranker.rerank_and_group(
+        cv_results = await reranker.rerank_and_group_async(
             query=query,
             chunks=cv_chunks,
             id_field="cvId",
@@ -536,7 +544,7 @@ class CareerCounselorRetriever:
             )
 
         generic_query = " ".join(required_skills)
-        query_vector = self.embedding_service.embed_text(generic_query, is_query=True)
+        query_vector = await self._embed_async(generic_query)
         threshold = get_adaptive_threshold("cv_analysis", True)
 
         results = self.qdrant_service.search_similar(

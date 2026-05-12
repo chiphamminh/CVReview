@@ -105,11 +105,13 @@ def create_indexes():
         "positionId": PayloadSchemaType.INTEGER,
         "version": PayloadSchemaType.INTEGER,
         "textLength": PayloadSchemaType.INTEGER,
-        
+
         # Keyword fields
         "hrId": PayloadSchemaType.KEYWORD,
-        "position": PayloadSchemaType.KEYWORD,
-        
+        # positionTitle / seniority used by chatbot-service scoring context builder
+        "positionTitle": PayloadSchemaType.KEYWORD,
+        "seniority": PayloadSchemaType.KEYWORD,
+
         # Boolean fields
         "is_latest": PayloadSchemaType.BOOL,
     }

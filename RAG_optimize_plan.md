@@ -1,914 +1,526 @@
 # RAG Optimization Plan — CVReview Chatbot System
 
-> **Author:** Senior Dev / AI Engineer analysis  
-> **Date:** 2026-05-11  
-> **Scope:** `chatbot-service` (Python/LangGraph) + `recruitment-service` (Java/MySQL) integration
+> **Last updated:** 2026-05-12  
+> **Scope:** `chatbot-service` (Python/LangGraph) + `recruitment-service` (Java/MySQL)
 
 ---
 
-## 1. Current Architecture Overview
+## 0. Hiểu đúng kiến trúc (quan trọng)
 
-### 1.1 Candidate Chatbot — Request Flow
-
-```
-User Query
-    │
-    ├─► [1] load_session_history + load_active_positions  (concurrent HTTP)
-    │       → recruitment-service /internal/chatbot/
-    │
-    ├─► [2] route_candidate_intent  (hard-rule regex, zero LLM cost)
-    │       → pipeline_strategy: JD_SEARCH / CV_ANALYSIS / JD_CONVERSE / ...
-    │
-    ├─► [3] expansion node  (LLM Flash, JD_SEARCH only)
-    │       → expanded_query + skill_variants
-    │
-    ├─► [4] retrieval node
-    │   ├─ JD_SEARCH: hybrid_retrieve_cv (Dense + Keyword → RRF → Cross-Encoder)
-    │   │              + JD dense search + rerank_and_group
-    │   ├─ CV_ANALYSIS: CV dense search only
-    │   └─ JD_ANALYSIS: JD dense search only
-    │
-    ├─► [5] scoring node  (Gemini 2.5 Pro — Turn 1 only, cached on Turn 2+)
-    │
-    ├─► [6] build_prompts_node  (prompt assembly)
-    │
-    ├─► [7] llm_reasoning_node  (Gemini 2.5 Flash + tool use)
-    │
-    └─► [8] save_turn_node  (async HTTP persist to MySQL)
-```
-
-### 1.2 HR Chatbot — HR Mode Flow (retrieve_for_hr_mode_hr)
+Hệ thống dùng **Two-Stage Pipeline** — LLM **không** nhận toàn bộ CV/JD:
 
 ```
-HR Query
-    ├─► embed(query)  →  search JD chunks (positionId filter)  [Qdrant call #1]
-    ├─► concat JD text  →  embed(jd_text)                      [Embedding call #2]
-    └─► search CV chunks (JD vector)                           [Qdrant call #2]
-         └─► rerank_and_group (Cross-Encoder)
+Stage 1 — RAG Filter (Qdrant, cheap):
+  Query vector → search CV/JD collection → top-K chunks
+  → Cross-Encoder rerank → top 5 unique CVs (hoặc JDs)
+
+Stage 2 — LLM Scoring (chỉ trên kết quả đã lọc):
+  Gemini nhận top 5-7 CVs → technical_score + experience_score + gap_advice
+  → ⚠️ CONFIRMED BUG: đang gọi N lần tuần tự (1 call/CV), không phải batch
+  → 5 CVs × ~6s/call = 30s chỉ riêng scoring — root cause chính của 2 phút
 ```
 
-### 1.3 Two-Stage RAG Pipeline (hybrid_retrieval.py)
-
-```
-expanded_query
-      │
-      ├──────────────────────────────────────┐
-      ▼                                      ▼
-Dense Search (asyncio.gather)        Keyword Search
-embed(expanded_query) → Qdrant       MatchAny on `skills` metadata
-limit = top_n × 4                    limit = top_n × 3
-      │                                      │
-      └──────────────┬───────────────────────┘
-                     ▼
-              RRF Merge (K=60, dense=0.6, keyword=0.4)
-              Cap 6 chunks/cvId
-                     ▼
-          Cross-Encoder rerank → group by cvId (Max Score)
-                     ▼
-              Top-N unique CVs returned
-```
+**Fix đơn giản nhất, impact lớn nhất:** Parallelize scoring calls với `asyncio.gather()`.
 
 ---
 
-## 2. Latency Breakdown & Bottleneck Analysis
+## 1. Intent Map (Final — Confirmed)
 
-### 2.1 Estimated Latency per Stage (JD_SEARCH, Turn 1)
+### 1.1 HR Chatbot
 
-| # | Stage | Module | Est. Time | Notes |
-|---|-------|--------|-----------|-------|
-| 1 | Session history load | recruitment_api.py | 100–200ms | HTTP call |
-| 1 | Active positions load | recruitment_api.py | 100–150ms | Concurrent with above |
-| 2 | Intent routing | router.py | ~1ms | Regex only, negligible |
-| 3 | **Query expansion** | expansion.py | **500–2000ms** | LLM Flash call, 4s timeout |
-| 4a | Query embedding | embedding.py | 30–80ms | Local SBERT, CPU-bound |
-| 4b | Dense search (Qdrant Cloud) | hybrid_retrieval.py | 100–250ms | Network + index scan |
-| 4c | Keyword search (Qdrant Cloud) | hybrid_retrieval.py | 80–200ms | Parallel with 4b |
-| 4d | RRF merge | hybrid_retrieval.py | ~1ms | Pure Python dict ops |
-| 4e | **Cross-Encoder rerank** | reranker.py | **200–800ms** | CPU-bound, ~45 pairs |
-| 5 | **Gemini 2.5 Pro scoring** | scoring.py | **2000–5000ms** | Turn 1 only |
-| 6 | Prompt assembly | prompts.py | ~2ms | String ops |
-| 7 | **Gemini 2.5 Flash reasoning** | reasoning.py | **2000–5000ms** | Every turn |
-| 8 | Persist messages (async) | persistence.py | ~100ms | Non-blocking |
+| Intent | RAG cần? | Bottleneck | Trigger mẫu |
+|--------|----------|-----------|-------------|
+| **SEARCH_CANDIDATES** | ✅ Full hybrid | Scoring + Retrieval | "Top 5 Java dev phù hợp nhất" |
+| **FIND_MORE** | ✅ Hybrid + exclude | Retrieval + Scoring | "Tìm thêm, loại những người đã mời" |
+| **SEND_INTERVIEW** | ❌ Tool call only | Tool HTTP × N | "Mời top 3, A: 9h T3, B: 10h T3, C: 2h T4" |
+| **GENERATE_QUESTIONS** | ❌ Internal API | LLM output length | "Tạo câu hỏi phỏng vấn cho Nguyễn A" |
 
-**Total JD_SEARCH Turn 1: ~5–13 seconds**  
-**Total JD_SEARCH Turn 2+ (cache hit): ~4–8 seconds**  
-**Target after optimization: Turn 1 ≤ 6s, Turn 2+ ≤ 4s**
+**Đã loại bỏ:** CANDIDATE_DETAIL (→ follow-up của SEARCH), STATUS_QUERIES (→ dashboard), COMPARE (→ follow-up tự nhiên).
 
-### 2.2 Identified Bottlenecks (Root Causes)
+### 1.2 Candidate Chatbot
 
-#### BN-01: Query Expansion LLM Call on Every JD_SEARCH Turn
-- **Location:** `app/rag/shared/expansion.py` → `_build_flash_llm()`
-- **Issue 1:** A **new `ChatGoogleGenerativeAI` instance** is created every call — connection overhead per request.
-- **Issue 2:** Called on **every JD_SEARCH turn including Turn 2+**, even when conversation context already has skill context from Turn 1.
-- **Issue 3:** For simple single-skill queries (`"tìm việc Python"`), LLM adds no value over whitelist extraction already done by router.
-- **Impact:** +500–2000ms per JD_SEARCH request.
+| Intent | RAG cần? | Bottleneck | Trigger mẫu |
+|--------|----------|-----------|-------------|
+| **FIND_JOBS** | ✅ Full hybrid | Scoring + Retrieval | "Tìm việc phù hợp với tôi" |
+| **CV_GAP_ANALYSIS** | ✅ CV + JD (no rerank) | LLM reasoning | "CV tôi thiếu gì cho vị trí Senior Java?" |
+| **APPLY** | ❌ Tool call only | Tool HTTP | "Tôi muốn apply vị trí này" |
 
-#### BN-02: Synchronous Embedding Blocks Event Loop in retriever.py
-- **Location:** `app/services/retriever.py:103` → `retrieve_for_intent()`
-  ```python
-  query_vector = self.embedding_service.embed_text(query, is_query=True)
-  ```
-- **Issue:** `embed_text` is CPU-bound (SentenceTransformer inference). Called **synchronously** in an async method — blocks the FastAPI event loop, preventing other requests from being served concurrently.
-- **Note:** `hybrid_retrieval.py` correctly uses `loop.run_in_executor()`. `retriever.py` does not.
-
-#### BN-03: Sequential CV + JD Qdrant Searches in _retrieve_jd_search_with_cv
-- **Location:** `app/services/retriever.py:198–228`
-- **Issue:** CV search completes, then JD search starts. These are **completely independent** operations.
-  ```python
-  cv_results = self.qdrant_service.search_similar(...)  # blocks ~150ms
-  jd_chunks  = self.qdrant_service.search_similar(...)  # starts AFTER cv
-  ```
-- **Impact:** +100–200ms wasted per JD_SEARCH call.
-
-#### BN-04: Cross-Encoder Model Lazy Loading (Cold Start)
-- **Location:** `app/services/reranker.py:35` → `_get_model()`
-- **Issue:** BAAI/bge-reranker-v2-m3 (~550MB) is loaded on **first rerank call** only. The first real user request triggers model load, taking **5–15 seconds**.
-- **Impact:** First user after restart gets extremely slow response with no warning.
-
-#### BN-05: Cross-Encoder is CPU-Bound, Runs in Async Context
-- **Location:** `app/services/reranker.py:72` → `model.predict(pairs)`
-- **Issue:** `CrossEncoder.predict()` is synchronous and CPU-bound. Called directly in an `async` graph node without `run_in_executor()` — blocks the event loop during inference (~200–800ms).
-- **Impact:** Blocks all concurrent requests while reranking.
-
-#### BN-06: HR Mode Has 2 Sequential Embedding + Qdrant Calls
-- **Location:** `app/services/retriever.py:382–412` → `retrieve_for_hr_mode_hr()`
-- **Issue:** 
-  1. `embed_text(query)` → `search_similar(jd_collection)` → get JD chunks
-  2. Concatenate JD text → `embed_text(jd_text)` → `search_similar(cv_collection)`  
-  The JD embedding vector (Step 2) is recomputed on **every HR query** even though it's deterministic for a given `position_id`.
-- **Impact:** +30–200ms per HR query + repeated network round-trips.
-
-#### BN-07: No Embedding Vector Cache
-- **Location:** `app/services/embedding.py`
-- **Issue:** No memoization. Identical queries (e.g., consecutive HR queries about the same position) re-run SentenceTransformer inference.
-- **Impact:** +30–80ms per duplicate query.
-
-#### BN-08: Skill Extraction Whitelist is O(N×M) Brute Force
-- **Location:** `app/rag/candidate/router.py:131–140` → `_extract_skill_keywords()`
-- **Issue:** For each query, iterates over all 90+ whitelist skills and does `re.search(rf'\b{skill}\b', query_lower)` — 90+ regex compilations per call (no `re.compile` cache used inside the loop).
-- **Impact:** Minor (~2–5ms), but grows with whitelist size.
-
-#### BN-09: No Conversation-Aware Routing
-- **Location:** `app/rag/candidate/router.py`
-- **Issue:** Router receives only the current `query` — no conversation history context. If Turn 1 was a JD_SEARCH and Turn 2 is `"tell me more about the salary"`, the router routes to `JD_CONVERSE` correctly. But `"what about experience requirements?"` maps to `JD_ANALYSIS` even though it likely refers to the same job from Turn 1. The `jd_id` is not threaded through from conversation context.
-- **Impact:** Suboptimal retrieval routing for follow-up questions.
-
-#### BN-10: Reranker Uses chunkText Field Only — Misses JD Context
-- **Location:** `app/services/reranker.py:69`
-  ```python
-  pairs = [(query, chunk.get("payload", {}).get("chunkText", "")) for chunk in chunks]
-  ```
-- **Issue:** For JD chunks, the relevant text is in `jdText` field, not `chunkText`. The `get_chunk_text()` helper in `retriever.py` handles this correctly (`jdText` → fallback `chunkText`), but the reranker bypasses it.
-- **Impact:** JD reranking scores are computed on empty strings when JD payload uses `jdText` key — degrades ranking quality.
+**Đã loại bỏ:** STATUS_CHECK (→ UI stage tags), JOB_DETAIL (→ candidate xem JD card).
 
 ---
 
-## 3. Optimization Strategy
+## 2. Data Design Decisions
 
-### Priority Matrix
+### 2.1 gap_advice thay thế learning_path
 
-| ID | Optimization | Impact | Effort | Priority |
-|----|-------------|--------|--------|----------|
-| O1 | Parallelize CV + JD Qdrant searches | High | Low | P1 |
-| O2 | Async embed_text via run_in_executor | High | Low | P1 |
-| O3 | Eager-load reranker at startup | High | Low | P1 |
-| O4 | Async reranker via run_in_executor | High | Low | P1 |
-| O5 | Fix reranker chunkText vs jdText bug | High | Low | P1 |
-| O6 | LLM singleton for expansion | Medium | Low | P1 |
-| O7 | Skip expansion on Turn 2+ (cache) | High | Medium | P2 |
-| O8 | Skip expansion for simple queries | Medium | Low | P2 |
-| O9 | LRU embedding cache | Medium | Low | P2 |
-| O10 | Cache JD vector per positionId | Medium | Medium | P2 |
-| O11 | Pre-compile skill regex patterns | Low | Low | P2 |
-| O12 | Qdrant payload index verification | High | Low | P2 |
-| O13 | Tiered scoring model (Flash→Pro) | Medium | Medium | P3 |
-| O14 | Conversation-aware routing | Medium | High | P3 |
-| O15 | Token streaming via SSE | High | High | P3 |
-| O16 | Redis session cache | Medium | High | P3 |
+`learning_path` sai ngữ nghĩa với Senior. Đổi thành `gap_advice` — AI tự calibrate theo seniority detect từ CV:
+
+| Level | Output |
+|-------|--------|
+| Junior (0–3 năm) | Structured roadmap: "Học Spring Boot → Docker → 60 ngày" |
+| Mid (3–6 năm) | Gap bridging: "Có Spring nhưng thiếu Kafka event-driven" |
+| Senior (6+ năm) | Strategic advice: "Thiếu K8s production scale — CKA cert" |
+
+### 2.2 Nơi lưu gap_advice
+
+```
+FIND_JOBS Turn 1:
+  AI scoring → gap_advice cho từng job → lưu trong chat_history.functionCall
+  UI hiển thị trong chat. KHÔNG lưu vào cv_analysis table.
+
+APPLY (score ≥ 70/minimum_fit_score):
+  → Tạo cv_analysis record: technical_score, experience_score, overall_status
+  → KHÔNG có gap_advice (candidate đã qualify)
+
+APPLY (score < 70) hoặc CV_GAP_ANALYSIS:
+  → Guardrail block / gap analysis
+  → gap_advice calibrated theo seniority, lưu trong chat history
+  → KHÔNG tạo cv_analysis record
+```
+
+**Quyết định:** Drop column `learning_path` khỏi `cv_analysis` table. `gap_advice` chỉ sống trong `chat_history.functionCall`.
+
+### 2.3 cv_analysis chỉ tạo khi APPLY thành công
+
+Mọi AI analysis trước đó (scoring, gap_advice) chỉ lưu tại `functionCall` trong `chat_history`. `cv_analysis` record được tạo duy nhất khi `finalize_application` tool call thành công.
 
 ---
 
-## 4. Priority 1 — Quick Wins (Low Effort, High Impact)
+## 3. Optimized Graph Path per Intent
 
-### O1: Parallelize CV + JD Qdrant Searches
+### 3.1 Nguyên tắc
 
-**File:** `app/services/retriever.py` → `_retrieve_jd_search_with_cv()`
+> Node đắt tiền (Qdrant, Cross-Encoder, LLM scoring) phải có **điều kiện skip rõ ràng** dựa trên session state. Router phân tích context TRƯỚC khi dispatch.
 
-**Problem:** CV and JD Qdrant searches run sequentially.
+### 3.2 Session State (tối giản — chỉ những gì cần thiết)
 
-**Fix:**
 ```python
-# BEFORE (sequential ~300ms total):
-cv_results = self.qdrant_service.search_similar(cv_collection, ...)
-jd_chunks  = self.qdrant_service.search_similar(jd_collection, ...)
+# Lưu trong chat_history.functionCall, restore tại load_session node
+{
+  # Routing state
+  "prev_strategy":    "SEARCH_CANDIDATES",
+  "conv_state":       "IDLE",           # IDLE | AWAITING_CONFIRM
+  "pending_action":   "SEND_INTERVIEW", # chỉ khi conv_state = AWAITING_CONFIRM
+  "pending_params":   {...},            # params đã parse, chờ confirm
 
-# AFTER (parallel ~150ms total):
-import asyncio
+  # HR-specific
+  "shown_cv_ids":     [12, 45, 78],     # cho FIND_MORE exclude
+  "ranked_cv_list":   [{"rank": 1, "cvId": 12, "name": "Nguyễn A"}, ...],
 
-async def _search_cv():
-    return self.qdrant_service.search_similar(cv_collection, ...)
-async def _search_jd():
-    return self.qdrant_service.search_similar(jd_collection, ...)
-
-cv_results, jd_chunks = await asyncio.gather(_search_cv(), _search_jd())
+  # Candidate-specific
+  "scored_jobs":      [...],            # cache Turn 1 scoring
+  "last_jd_id":       3,               # JD context cho CV_GAP_ANALYSIS
+}
 ```
 
-Note: `qdrant_service.search_similar()` is synchronous (uses sync QdrantClient). Wrap each in `asyncio.get_event_loop().run_in_executor(None, ...)` before gathering, or migrate `QdrantService` to use `AsyncQdrantClient`.
+### 3.3 HR Chatbot — Đường đi
 
-**Estimated gain:** -100–200ms per JD_SEARCH request.
+```
+load_session → route_hr_intent
+    │
+    ├─ SEARCH_CANDIDATES
+    │   expansion* → retrieve_hybrid → scoring(batch) → prompts → llm → save
+    │   *skip nếu query ≤ 5 words với skill keywords rõ ràng
+    │
+    ├─ FIND_MORE
+    │   SKIP expansion
+    │   retrieve_hybrid(exclude_ids=shown_cv_ids) → scoring(batch) → prompts → llm → save
+    │
+    ├─ SEND_INTERVIEW
+    │   SKIP expansion, retrieve, scoring
+    │   [entity resolve: "người thứ 2" → cvId từ ranked_cv_list]
+    │   prompts → llm(tool: send_interview_email × N parallel) → save
+    │
+    └─ GENERATE_QUESTIONS
+        SKIP expansion, Qdrant
+        fetch full cv+jd text (internal API) → prompts → llm → save
+```
+
+### 3.4 Candidate Chatbot — Đường đi
+
+```
+load_session → route_candidate_intent
+    │
+    ├─ FIND_JOBS
+    │   ├─ New search (no scored_jobs cache OR new skill keywords):
+    │   │   expansion → retrieve_hybrid(CV+JD) → scoring(batch) → prompts → llm → save
+    │   │
+    │   └─ Follow-up (scored_jobs cache hit, query ngắn, không skill mới):
+    │       SKIP expansion, retrieve, scoring
+    │       prompts(scored_jobs từ cache) → llm → save
+    │
+    ├─ CV_GAP_ANALYSIS
+    │   [fallback nếu last_jd_id null: → route sang FIND_JOBS trước]
+    │   SKIP expansion, scoring
+    │   retrieve(cv_id + last_jd_id, no rerank) → prompts(gap template) → llm → save
+    │
+    └─ APPLY
+        SKIP expansion, retrieve, scoring
+        [guardrail: score ≥ threshold từ scored_jobs cache]
+        → Pass: llm(tool: finalize_application) → save
+        → Fail: prompts(gap_advice by seniority) → llm → save
+```
+
+### 3.5 Skip Flag Decision
+
+```python
+def decide_path_flags(state: dict) -> dict:
+    strategy       = state["pipeline_strategy"]
+    scored_jobs    = state.get("scored_jobs")
+    has_new_skills = bool(state.get("query_entities", {}).get("skill_keywords"))
+    short_query    = len(state.get("query", "").split()) <= 12
+
+    flags = {"skip_expansion": False, "skip_retrieval": False, "skip_scoring": False}
+
+    if strategy == "APPLY":
+        flags.update(skip_expansion=True, skip_retrieval=True, skip_scoring=True)
+
+    elif strategy == "FIND_JOBS":
+        is_followup = scored_jobs and not has_new_skills and short_query
+        if is_followup:
+            flags.update(skip_expansion=True, skip_retrieval=True, skip_scoring=True)
+
+    elif strategy == "CV_GAP_ANALYSIS":
+        flags.update(skip_expansion=True, skip_scoring=True)
+
+    elif strategy == "FIND_MORE":
+        flags["skip_expansion"] = True
+
+    elif strategy in ("SEND_INTERVIEW", "GENERATE_QUESTIONS"):
+        flags.update(skip_expansion=True, skip_retrieval=True, skip_scoring=True)
+
+    return flags
+```
 
 ---
 
-### O2: Fix Synchronous embed_text Blocking Event Loop
+## 4. Conversation State Machine (Minimal)
 
-**File:** `app/services/retriever.py:103` → `retrieve_for_intent()`  
-Also: `retriever.py:462` → `retrieve_for_hr_mode_candidate()`
+Chỉ implement 3 categories thực sự gây pain, bỏ qua những case phức tạp không xứng giá trị:
 
-**Problem:** `embed_text()` is called synchronously in async methods.
+### Categories được implement
 
-**Fix:**
+| Cat | Case | Fix |
+|-----|------|-----|
+| **1+2** | Confirm/Reject sau AWAITING_CONFIRM | State machine Layer 0 |
+| **4** | Continuation ("tiếp", "3 người nữa") | Layer 3 context fallback |
+| **5** | Ordinal reference ("người thứ 2") | ranked_cv_list resolution |
+
+### Categories bỏ qua (complexity > value)
+
+| Cat | Case | Lý do bỏ |
+|-----|------|----------|
+| 3 | Modification pre-confirm | Bảo user nói lại từ đầu là UX acceptable |
+| 6 | Pronoun ("họ", "người đó") | Quá ambiguous, dễ sai hơn bỏ qua |
+| 7 | Reply to LLM clarification | Rare, LLM tự handle qua history context |
+| 8 | Selection từ list ("cái 2") | Merge vào ordinal resolution |
+
+### Implementation — LLM tự set flag (không dùng regex heuristic)
+
+**Vấn đề với regex detection:** LLM paraphrase confirmation theo nhiều cách khác nhau → regex miss → state không được set.
+
+**Giải pháp:** LLM khai báo rõ qua structured tag trong system prompt:
+
 ```python
+# Thêm vào system prompt:
+"""
+Khi cần user xác nhận trước khi thực hiện action không thể hoàn tác
+(gửi email, nộp đơn), BẮT BUỘC kết thúc response bằng:
+<needs_confirm action="SEND_INTERVIEW"></needs_confirm>
+
+Khi không cần confirm, KHÔNG thêm tag này.
+"""
+
+# save_turn node — parse tag, không regex heuristic:
+import re
+tag = re.search(r'<needs_confirm action="(\w+)">', llm_response)
+if tag:
+    state["conv_state"]    = "AWAITING_CONFIRM"
+    state["pending_action"] = tag.group(1)
+    state["final_answer"]  = llm_response[:tag.start()].strip()
+else:
+    state["conv_state"] = "IDLE"
+```
+
+### Router với State Machine (≤ 50 lines tổng)
+
+```python
+_CONFIRM  = re.compile(r"^(ok|yes|đúng|đồng ý|xác nhận|gửi đi|được|ừ|sure|confirm)[\s!.]*$", re.I)
+_REJECT   = re.compile(r"^(không|no|thôi|hủy|cancel|dừng)[\s!.]*$", re.I)
+_CONTINUE = re.compile(r"\b(tiếp|thêm|more|tìm thêm|còn ai|next|3 người nữa|\d+ người nữa)\b", re.I)
+
+_CONTINUATION_MAP = {
+    "SEARCH_CANDIDATES": "FIND_MORE",
+    "FIND_MORE":         "FIND_MORE",
+}
+
+def route_intent(state: dict) -> str:
+    query = state["query"].strip()
+
+    # L0: State machine — highest priority
+    if state.get("conv_state") == "AWAITING_CONFIRM":
+        if _CONFIRM.match(query):  return state["pending_action"]
+        if _REJECT.match(query):   return "CANCELLED"
+        return state["pending_action"]  # modification → LLM re-parse pending_params
+
+    # L1: Hard-rule patterns (hiện tại — giữ nguyên)
+    # ... existing regex matching ...
+
+    # L2: Context-informed short query
+    if len(query.split()) <= 4 and _CONTINUE.search(query):
+        prev = state.get("prev_strategy", "")
+        if prev in _CONTINUATION_MAP:
+            return _CONTINUATION_MAP[prev]
+
+    # L3: Default
+    return "SEARCH_CANDIDATES"  # HR  /  "FIND_JOBS"  # Candidate
+```
+
+### Ordinal Entity Resolution
+
+```python
+_ORDINAL = re.compile(
+    r"(?:người|ứng viên|vị trí|job|candidate)\s*(?:thứ\s*)?(\d+|đầu tiên|cuối|last|first)",
+    re.I
+)
+
+def resolve_ordinal(query: str, ranked_list: list) -> Optional[int]:
+    """Map 'người thứ 2' → cvId hoặc positionId từ ranked_list."""
+    m = _ORDINAL.search(query)
+    if not m: return None
+    raw = m.group(1).lower()
+    idx = {"đầu tiên": 0, "first": 0, "cuối": -1, "last": -1}.get(raw)
+    if idx is None:
+        try: idx = int(raw) - 1
+        except: return None
+    if 0 <= idx < len(ranked_list):
+        return ranked_list[idx].get("cvId") or ranked_list[idx].get("positionId")
+    return None
+```
+
+---
+
+## 5. Performance Bottlenecks & Fixes
+
+### 5.1 Xác định bottleneck thật của 2 phút (cần verify)
+
+```
+Verify ngay: scoring node gọi Gemini bao nhiêu lần cho 5 CVs?
+  → 1 batch call (tất cả 5 CVs trong 1 prompt): ~5-8s — acceptable
+  → 5 separate calls (1 call/CV):               ~25-40s — đây là bug
+
+Cách kiểm tra: đếm số Gemini API calls trong logs khi chạy SEARCH_CANDIDATES
+```
+
+### 5.2 Priority Matrix
+
+| ID | Fix | Impact | Effort | Sprint |
+|----|-----|--------|--------|--------|
+| **F0** | **Parallelize scoring calls (asyncio.gather)** | Critical | Low | S1 FIRST |
+| **F1** | **Fix chunkText vs jdText reranker bug** | Critical | Low | S1 |
+| **F2** | **Qdrant payload indexes** | High (ở scale) | Low | S1 |
+| **F3** | **Eager-load reranker tại startup** | High (cold start) | Low | S1 |
+| F4 | Async reranker (run_in_executor) | High (concurrency) | Low | S1 |
+| F5 | Async embed_text (run_in_executor) | Medium | Low | S1 |
+| F6 | LLM singleton cho expansion | Medium | Low | S1 |
+| F7 | Parallelize CV + JD Qdrant searches | High | Low | S2 |
+| F8 | Skip expansion: simple queries (≤5 words + skills) | Medium | Low | S2 |
+| F9 | Skip expansion + retrieval: FIND_JOBS follow-up | High | Medium | S2 |
+| F10 | JD vector cache per positionId (HR mode) | Medium | Low | S2 |
+| F11 | LRU embedding cache | Medium | Low | S2 |
+| F12 | Conversation state machine (AWAITING_CONFIRM) | Critical | Medium | S2 |
+| F13 | Ordinal entity resolution | High | Medium | S2 |
+| F14 | Tiered scoring: Flash default, Pro on-demand | High | Medium | S3 |
+| F15 | AND/OR compound skill filter | High | Medium | S3 |
+| F16 | Batch interview email (parallel tool calls) | Medium | Low | S3 |
+| F17 | Token streaming qua SSE | High (UX) | High | S4 |
+| F18 | Redis session cache | Medium | High | S4 |
+
+### 5.3 Target Latency sau optimization
+
+| Intent | Hiện tại | Target | Fixes chính |
+|--------|---------|--------|------------|
+| SEARCH_CANDIDATES T1 | ~120s | 8–12s | F0,F1,F2,F3,F4,F7,F14 |
+| FIND_MORE | ~60s | 6–10s | F0,F1,F2,F3,F4,F7 |
+| SEND_INTERVIEW | ~5s | 1–3s | F12,F13 |
+| GENERATE_QUESTIONS | ~8s | 4–7s | — |
+| FIND_JOBS T1 | ~90s | 6–10s | F1,F2,F3,F4,F7,F14 |
+| FIND_JOBS T2+ (cache) | ~30s | 1.5–3s | F9 |
+| CV_GAP_ANALYSIS | ~15s | 3–5s | F2,F4 |
+| APPLY | ~5s | 1–2s | F12 |
+| AWAITING_CONFIRM flows | ~60s | <1s | F12 |
+
+---
+
+## 6. Sprint Plan
+
+### Sprint 1 — Critical Fixes (1–2 ngày)
+
+Không cần đụng đến logic — chỉ fix bugs và technical issues:
+
+**F0: Parallelize scoring calls (LÀM NGAY — root cause của 2 phút)**
+```python
+# hr/nodes/scoring.py — BEFORE: sequential for loop
+for candidate in candidates:
+    response = await llm.ainvoke(...)   # chờ từng cái → 5 × 6s = 30s
+
+# AFTER: parallel với asyncio.gather → tất cả chạy đồng thời → ~6s tổng
+async def _score_one(candidate: dict) -> dict:
+    response = await llm.ainvoke([HumanMessage(content=_build_prompt(candidate, jd_text))])
+    return _parse_score(response, candidate)
+
+results = await asyncio.gather(*[_score_one(c) for c in candidates])
+```
+Tương tự cần apply cho candidate scoring node nếu cùng pattern.
+
+---
+
+**F1: Fix reranker chunkText vs jdText (LÀM NGAY)**
+```python
+# reranker.py:69 — silent bug: JD chunks score trên empty string
 # BEFORE:
-query_vector = self.embedding_service.embed_text(query, is_query=True)
-
+pairs = [(query, chunk["payload"].get("chunkText", "")) for chunk in chunks]
 # AFTER:
+def _text(p): return (p.get("jdText") or p.get("chunkText") or "").strip()
+pairs = [(query, _text(chunk["payload"])) for chunk in chunks]
+```
+
+**F3: Eager-load reranker tại startup**
+```python
+# main.py — lifespan():
+loop = asyncio.get_event_loop()
+await loop.run_in_executor(None, reranker._get_model)
+await loop.run_in_executor(None, lambda: reranker._get_model().predict([("warmup", "text")]))
+```
+
+**F4: Async reranker**
+```python
+# reranker.py — thêm async wrapper:
+async def rerank_and_group_async(self, query, chunks, id_field, top_n):
+    return await asyncio.get_event_loop().run_in_executor(
+        None, lambda: self.rerank_and_group(query, chunks, id_field, top_n)
+    )
+```
+
+**F5: Async embed_text trong retriever.py**
+```python
+# retriever.py — tất cả embed_text() calls:
 loop = asyncio.get_event_loop()
 query_vector = await loop.run_in_executor(
     None, lambda: self.embedding_service.embed_text(query, is_query=True)
 )
 ```
 
-This matches the pattern already used in `hybrid_retrieval.py:_dense_search()`.
+**F6: LLM singleton cho expansion**
+```python
+# expansion.py — module-level singleton:
+_LLM = None
+def _get_llm():
+    global _LLM
+    if _LLM is None:
+        _LLM = ChatGoogleGenerativeAI(model=settings.GEMINI_MODEL, ...)
+    return _LLM
+```
 
-**Estimated gain:** Unblocks event loop during ~30–80ms inference. More important under concurrent load.
+**F2: Qdrant payload indexes (one-time migration)**
+```python
+# cv_embeddings:
+for field, schema in [
+    ("is_latest", "bool"), ("cvId", "integer"), ("candidateId", "keyword"),
+    ("positionId", "integer"), ("sourceType", "keyword"),
+    ("applied_position_ids", "integer"), ("seniorityLevel", "keyword"),
+]:
+    client.create_payload_index("cv_embeddings", field, field_schema=schema)
+# jd_embeddings:
+client.create_payload_index("jd_embeddings", "positionId", "integer")
+```
 
 ---
 
-### O3: Eager-Load Reranker Model at Startup
+### Sprint 2 — Routing & Graph Optimization (2–3 ngày)
 
-**File:** `app/main.py` → `lifespan()` function  
-**File:** `app/services/reranker.py`
-
-**Problem:** BAAI/bge-reranker-v2-m3 loads on first user request (~5–15s cold start).
-
-**Fix — Add warm-up in lifespan:**
+**F7: Parallelize CV + JD Qdrant searches**
 ```python
-# app/main.py
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # existing: embedding model + Qdrant preload
-    logger.info("Pre-loading Cross-Encoder reranker model...")
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, reranker._get_model)  # trigger lazy load
-    # optional: warm up with a dummy pair to JIT-compile inference path
-    await loop.run_in_executor(
-        None, lambda: reranker._get_model().predict([("warm-up query", "warm-up text")])
-    )
-    logger.info("Reranker model ready.")
-    yield
+# retriever.py — _retrieve_jd_search_with_cv():
+loop = asyncio.get_event_loop()
+cv_fut = loop.run_in_executor(None, lambda: qdrant.search_similar(cv_collection, ...))
+jd_fut = loop.run_in_executor(None, lambda: qdrant.search_similar(jd_collection, ...))
+cv_results, jd_chunks = await asyncio.gather(cv_fut, jd_fut)
 ```
 
-**Estimated gain:** Eliminates 5–15s first-request latency. Critical for production reliability.
-
----
-
-### O4: Async Reranker Execution via Thread Pool
-
-**File:** `app/services/reranker.py` → `rerank_and_group()`  
-**File:** `app/rag/shared/hybrid_retrieval.py:235`
-
-**Problem:** `CrossEncoder.predict(pairs)` is CPU-bound (~200–800ms), called in async context.
-
-**Fix — Make `rerank_and_group` async:**
+**F8+F9: Skip expansion logic**
 ```python
-# app/services/reranker.py
-import asyncio
-
-async def rerank_and_group_async(
-    self,
-    query: str,
-    chunks: List[Dict[str, Any]],
-    id_field: str,
-    top_n: int,
-) -> List[Dict[str, Any]]:
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(
-        None, lambda: self.rerank_and_group(query, chunks, id_field, top_n)
-    )
+# expansion.py:
+def _should_skip(query: str, skills: list, scored_jobs, has_new_skills: bool) -> bool:
+    simple_query = len(query.split()) <= 5 and len(skills) >= 1
+    followup     = scored_jobs is not None and not has_new_skills
+    return simple_query or followup
 ```
 
-Keep synchronous `rerank_and_group()` for backward compat. Update all call sites in `hybrid_retrieval.py` and `retriever.py` to `await reranker.rerank_and_group_async(...)`.
+**F12: Conversation state machine**
+- Thêm `conv_state` + `pending_action` + `pending_params` vào state schema
+- Thêm `<needs_confirm>` tag vào system prompt
+- Parse tag trong save_turn node
+- Thêm Layer 0 vào router
 
-**Estimated gain:** Unblocks event loop during reranking. Under load with 3+ concurrent users, this prevents request queuing.
+**F13: Ordinal entity resolution**
+- Thêm `ranked_cv_list` / `ranked_job_list` vào session state
+- Implement `resolve_ordinal()` function
+- Gọi trong route node trước khi dispatch SEND_INTERVIEW / CV_GAP_ANALYSIS
 
----
-
-### O5: Fix Reranker chunkText vs jdText Field Bug
-
-**File:** `app/services/reranker.py:69`
-
-**Problem:** Reranker always reads `payload["chunkText"]` but JD chunks store text in `payload["jdText"]`.
-
-**Fix:**
+**F10+F11: Caching**
 ```python
-# BEFORE:
-pairs = [
-    (query, chunk.get("payload", {}).get("chunkText", ""))
-    for chunk in chunks
-]
-
-# AFTER: use same helper as retriever.py
-def _get_text(payload: dict) -> str:
-    return (payload.get("jdText") or payload.get("chunkText") or "").strip()
-
-pairs = [
-    (query, _get_text(chunk.get("payload", {})))
-    for chunk in chunks
-]
-```
-
-**Impact:** JD reranking was silently scoring against empty strings. This fix alone may significantly improve JD ranking quality without any latency change.
-
----
-
-### O6: LLM Singleton for Query Expansion
-
-**File:** `app/rag/shared/expansion.py`
-
-**Problem:** `_build_flash_llm()` creates a new `ChatGoogleGenerativeAI` instance per expansion call — repeated connection setup overhead.
-
-**Fix:**
-```python
-# BEFORE:
-def _build_flash_llm() -> ChatGoogleGenerativeAI:
-    return ChatGoogleGenerativeAI(...)
-
-async def _call_expansion_llm(query, skill_keywords):
-    llm = _build_flash_llm()  # new instance every call
-    ...
-
-# AFTER: module-level singleton (initialized once at import time)
-_EXPANSION_LLM: Optional[ChatGoogleGenerativeAI] = None
-
-def _get_expansion_llm() -> ChatGoogleGenerativeAI:
-    global _EXPANSION_LLM
-    if _EXPANSION_LLM is None:
-        _EXPANSION_LLM = ChatGoogleGenerativeAI(
-            model=settings.GEMINI_MODEL,
-            temperature=0.1,
-            max_output_tokens=512,
-            google_api_key=settings.GEMINI_API_KEY,
-        )
-    return _EXPANSION_LLM
-```
-
-**Estimated gain:** Eliminates connection overhead (~20–50ms per expansion call).
-
----
-
-## 5. Priority 2 — Medium-Effort Wins
-
-### O7: Skip Expansion on Turn 2+ (Expansion Result Caching)
-
-**File:** `app/rag/candidate/nodes/expansion.py`  
-**File:** `app/rag/candidate/state.py`
-
-**Problem:** Query expansion is called on every JD_SEARCH turn, including Turn 2+, even when the user's context hasn't changed.
-
-**Strategy:** Store `(expanded_query, skill_variants)` in LangGraph state after Turn 1. On Turn 2+, if `pipeline_strategy == JD_SEARCH` and `state["expansion_cache"]` exists with the same topic scope, reuse it.
-
-**State change:**
-```python
-# state.py — add field:
-"expansion_cache": Optional[Dict]  # {"expanded_query": str, "skill_variants": List[str], "turn": int}
-```
-
-**Expansion node logic:**
-```python
-# nodes/expansion.py
-cache = state.get("expansion_cache")
-query = state["query"]
-
-# Reuse if: cache exists AND query is a follow-up (similar length or refinement)
-# Simple heuristic: if query has same extracted skills AND len(query) < 20 words
-# A follow-up like "tell me more" or "what about salary?" shouldn't re-expand
-if cache and _is_followup_query(query, state.get("query_entities", {})):
-    expanded_query = cache["expanded_query"]
-    skill_variants = cache["skill_variants"]
-    print(f"[Expansion] Cache hit — reusing Turn {cache['turn']} expansion")
-else:
-    expanded_query, skill_variants = await expand_query(query, skill_keywords)
-    state["expansion_cache"] = {
-        "expanded_query": expanded_query,
-        "skill_variants": skill_variants,
-        "turn": state.get("turn_number", 1),
-    }
-
-def _is_followup_query(query: str, entities: dict) -> bool:
-    words = query.split()
-    has_skills = bool(entities.get("skill_keywords"))
-    # Short queries without skill mentions are likely follow-ups
-    return len(words) <= 12 and not has_skills
-```
-
-**Estimated gain:** Saves 500–2000ms on ~60% of Turn 2+ JD_SEARCH requests.
-
----
-
-### O8: Skip Expansion for Simple Skill Queries
-
-**File:** `app/rag/shared/expansion.py` → `expand_query()`
-
-**Problem:** For queries like `"tìm việc python"` or `"java developer jobs"`, the router's whitelist already extracts `["python"]` or `["java"]`. An LLM call to produce `["Python", "Django", "Flask", "FastAPI"]` adds latency but marginal improvement.
-
-**Heuristic Skip Conditions:**
-1. Query ≤ 4 words AND skill_keywords already extracted ≥ 1 skill
-2. Query is purely skill-based (matches `^(tìm việc|find.*job[s]?)?\s*<skill>$`)
-
-```python
-async def expand_query(query: str, skill_keywords: List[str]) -> Tuple[str, List[str]]:
-    # Skip expansion for simple queries — keyword search with router-extracted
-    # skills is already sufficient; LLM adds marginal recall at high latency cost.
-    if _should_skip_expansion(query, skill_keywords):
-        print(f"[Expansion] Skipped — simple query with {len(skill_keywords)} extracted skills")
-        return query, skill_keywords
-
-    # ... existing LLM call
-
-def _should_skip_expansion(query: str, skill_keywords: List[str]) -> bool:
-    words = query.split()
-    return len(words) <= 5 and len(skill_keywords) >= 1
-```
-
-**Estimated gain:** Saves 500–2000ms for ~30% of JD_SEARCH queries.
-
----
-
-### O9: LRU Embedding Cache for Frequent Queries
-
-**File:** `app/services/embedding.py`
-
-**Problem:** Embedding is deterministic. Identical queries (e.g., HR asks about the same position repeatedly) re-run inference.
-
-**Fix:**
-```python
-from functools import lru_cache
-import hashlib
-
-class EmbeddingService:
-    # ... existing code ...
-
-    def embed_text(self, text: str, is_query: bool = False) -> List[float]:
-        cache_key = hashlib.md5(f"{text}:{is_query}".encode()).hexdigest()
-        return self._embed_cached(cache_key, text, is_query)
-
-    @lru_cache(maxsize=512)
-    def _embed_cached(self, cache_key: str, text: str, is_query: bool) -> tuple:
-        # lru_cache requires hashable return — use tuple
-        vector = self._embed_raw(text, is_query)
-        return tuple(vector)
-```
-
-Note: Since `lru_cache` requires hashable args and returns, the actual text must be passed. Use `functools.lru_cache` on a wrapper or a manual `dict` cache with `maxsize` eviction.
-
-For production, keep it simple:
-```python
+# JD vector cache (retriever.py):
+_JD_VEC: dict = {}  # positionId → vector
+# LRU embedding cache (embedding.py):
 from collections import OrderedDict
-
-_EMBED_CACHE: OrderedDict = OrderedDict()
-_EMBED_CACHE_MAX = 512
-
-def embed_text(self, text: str, is_query: bool = False) -> List[float]:
-    key = f"{is_query}:{text}"
-    if key in _EMBED_CACHE:
-        _EMBED_CACHE.move_to_end(key)  # LRU update
-        return _EMBED_CACHE[key]
-    vector = self._run_model(text, is_query)
-    _EMBED_CACHE[key] = vector
-    if len(_EMBED_CACHE) > _EMBED_CACHE_MAX:
-        _EMBED_CACHE.popitem(last=False)
-    return vector
-```
-
-**Estimated gain:** Near-zero latency for repeated queries. High hit rate for HR-mode (same JD query repeated across sessions).
-
----
-
-### O10: Cache JD Embedding Vector per positionId
-
-**File:** `app/services/retriever.py` → `retrieve_for_hr_mode_hr()`
-
-**Problem:** For every HR query about position X, the system:
-1. Fetches JD chunks from Qdrant
-2. Concatenates JD text
-3. Re-embeds the concatenated text
-
-The JD content only changes when HR uploads a new JD. The embedding is deterministic. This is pure wasted computation.
-
-**Fix — In-memory JD vector cache:**
-```python
-# app/services/retriever.py (top of file)
-from typing import Dict, List
-_JD_VECTOR_CACHE: Dict[int, List[float]] = {}  # positionId → embedding vector
-
-# In retrieve_for_hr_mode_hr():
-if position_id in _JD_VECTOR_CACHE:
-    ranking_vector = _JD_VECTOR_CACHE[position_id]
-    print(f"[HR Mode] Using cached JD vector for position {position_id}")
-else:
-    # ... existing fetch + embed logic ...
-    _JD_VECTOR_CACHE[position_id] = ranking_vector
-
-# Cache invalidation: expose a function called when HR uploads new JD
-def invalidate_jd_vector_cache(position_id: int):
-    _JD_VECTOR_CACHE.pop(position_id, None)
-```
-
-Wire invalidation into the `internal.py` route that handles JD updates, or add a dedicated `/internal/cache/invalidate` endpoint.
-
-**Estimated gain:** Saves one full embed call (~50ms) + one Qdrant round trip (~150ms) per HR query = -200ms for every HR Mode request after the first.
-
----
-
-### O11: Pre-Compile Skill Regex Patterns in Router
-
-**File:** `app/rag/candidate/router.py` → `_extract_skill_keywords()`
-
-**Problem:** For each query, `re.search(rf'\b{re.escape(skill)}\b', query_lower)` is called for all 90+ skills. Python re-compiles each pattern every call (no compiled pattern caching inside the loop).
-
-**Fix — Pre-compile all skill patterns at module load time:**
-```python
-# Build compiled patterns once at module import
-_SKILL_PATTERNS: Dict[str, re.Pattern] = {
-    skill: re.compile(rf'\b{re.escape(skill)}\b', re.IGNORECASE)
-    for skill in _TECH_SKILL_WHITELIST
-}
-
-def _extract_skill_keywords(query: str) -> List[str]:
-    found: set = set()
-    for skill, pattern in _SKILL_PATTERNS.items():
-        if pattern.search(query):
-            found.add(skill)
-    return list(found)
-```
-
-**Estimated gain:** Minor (2–5ms → <0.5ms). Worth doing for correctness and scalability as whitelist grows.
-
----
-
-### O12: Verify Qdrant Payload Index Configuration
-
-**File:** `app/services/qdrant.py` or deployment config
-
-**Problem (critical):** Without explicit payload indexes in Qdrant, every filtered vector search scans ALL payload fields linearly before applying HNSW. With thousands of CVs, unindexed filters can increase search time from ~10ms to 500ms+.
-
-**Verify these fields are indexed in both collections:**
-
-For `cv_embeddings`:
-```python
-# Must be created as payload indexes:
-client.create_payload_index(
-    collection_name="cv_embeddings",
-    field_name="is_latest",
-    field_schema=PayloadSchemaType.BOOL,
-)
-client.create_payload_index("cv_embeddings", "cvId", PayloadSchemaType.INTEGER)
-client.create_payload_index("cv_embeddings", "candidateId", PayloadSchemaType.KEYWORD)
-client.create_payload_index("cv_embeddings", "positionId", PayloadSchemaType.INTEGER)
-client.create_payload_index("cv_embeddings", "sourceType", PayloadSchemaType.KEYWORD)
-client.create_payload_index("cv_embeddings", "applied_position_ids", PayloadSchemaType.INTEGER)
-```
-
-For `jd_embeddings`:
-```python
-client.create_payload_index("jd_embeddings", "positionId", PayloadSchemaType.INTEGER)
-client.create_payload_index("jd_embeddings", "section", PayloadSchemaType.KEYWORD)
-```
-
-Add these to the collection initialization code in `qdrant.py` or as a one-time migration script.
-
-**Estimated gain:** Without indexes: 200–1000ms+ on filtered searches. With indexes: 10–50ms. This is potentially the **single highest-impact optimization** at scale.
-
----
-
-## 6. Priority 3 — Architectural Improvements
-
-### O13: Tiered Scoring Model Strategy
-
-**File:** `app/rag/candidate/nodes/scoring.py`
-
-**Current:** Gemini 2.5 Pro is used for ALL Turn 1 scoring (2000–5000ms, high cost).
-
-**Proposed tiered approach:**
-- **Tier 1 (default):** Gemini 2.5 Flash → fast initial ranking (~500–1500ms, ~10× cheaper)
-- **Tier 2 (on-demand):** Gemini 2.5 Pro → triggered only when user asks for deep analysis (`"phân tích chi tiết"`, `"đánh giá kỹ"`) or after applying
-
-**Logic:**
-```python
-# scoring.py
-DEEP_ANALYSIS_PATTERNS = re.compile(
-    r"\b(phân tích chi tiết|đánh giá kỹ|deep analysis|detailed review|thoroughly)\b",
-    re.IGNORECASE
-)
-
-def _select_scoring_model(query: str) -> str:
-    if DEEP_ANALYSIS_PATTERNS.search(query):
-        return settings.SCORING_GEMINI_MODEL   # Pro
-    return settings.GEMINI_MODEL               # Flash
-```
-
-**Estimated gain:** -1500–3500ms for ~80% of scoring calls. Also reduces Gemini Pro API costs significantly.
-
----
-
-### O14: Conversation-Aware Intent Routing
-
-**File:** `app/rag/candidate/nodes/session.py` + `app/rag/candidate/router.py`
-
-**Problem:** Follow-up questions like `"salary?"` or `"what about remote work?"` don't carry the context that user is discussing a specific position found in Turn 1.
-
-**Fix — Thread `last_mentioned_jd_id` through state:**
-
-In `session.py` (load_session_history node), parse the last assistant turn's metadata to extract the most recently discussed `positionId`:
-```python
-# session.py: extract last mentioned position from metadata
-for msg in reversed(history):
-    if msg["role"] == "ASSISTANT" and msg.get("functionCall"):
-        fc = json.loads(msg["functionCall"])
-        if fc.get("scored_jobs"):
-            top_job = sorted(fc["scored_jobs"], key=lambda j: j.get("overallScore", 0), reverse=True)
-            if top_job:
-                state["last_mentioned_jd_id"] = top_job[0]["positionId"]
-                break
-```
-
-In `router.py`, use `last_mentioned_jd_id` to enrich routing for JD_CONVERSE/JD_ANALYSIS:
-```python
-# If routing to JD_CONVERSE or JD_ANALYSIS and no explicit jd_id in query,
-# default to last_mentioned_jd_id from session
-if strategy in ("JD_CONVERSE", "JD_ANALYSIS") and not state.get("jd_id"):
-    state["jd_id"] = state.get("last_mentioned_jd_id")
-```
-
-**Impact:** Eliminates "I don't have context for that question" responses on natural follow-ups.
-
----
-
-### O15: Token Streaming Through LangGraph
-
-**File:** `app/rag/candidate/nodes/reasoning.py`  
-**File:** `app/api/routes/candidate_chat.py`
-
-**Problem:** The current implementation returns the full LLM response after completion. Users see nothing for 2–5 seconds then the entire response appears.
-
-**Fix — Enable streaming in reasoning node:**
-```python
-# reasoning.py
-async def llm_reasoning_node(state: CandidateChatState) -> CandidateChatState:
-    # ... existing tool setup ...
-    
-    # Stream tokens via generator
-    full_response = ""
-    async for chunk in llm.astream(messages):
-        if hasattr(chunk, "content") and chunk.content:
-            full_response += chunk.content
-            # Emit SSE event if a queue/callback is available in state
-            if state.get("stream_callback"):
-                await state["stream_callback"](chunk.content)
-    
-    state["llm_response"] = full_response
-    return state
-```
-
-**Route change:**
-```python
-# candidate_chat.py
-@router.post("/chatbot/candidate/chat")
-async def candidate_chat(request: ChatRequest):
-    async def event_generator():
-        # Pass SSE queue into graph state
-        queue = asyncio.Queue()
-        state["stream_callback"] = queue.put_nowait
-        
-        # Run graph in background
-        task = asyncio.create_task(candidate_chatbot.chat(state))
-        
-        while not task.done():
-            try:
-                token = await asyncio.wait_for(queue.get(), timeout=0.1)
-                yield f"data: {json.dumps({'token': token})}\n\n"
-            except asyncio.TimeoutError:
-                pass
-        
-        result = await task
-        yield f"data: {json.dumps({'done': True, 'metadata': result.metadata})}\n\n"
-    
-    return EventSourceResponse(event_generator())
-```
-
-**Impact:** Perceived latency drops dramatically. User sees tokens after ~200ms instead of waiting 4–5s. This is a UX transformation, not just a performance optimization.
-
----
-
-### O16: Redis Session Cache for Hot Conversations
-
-**File:** `app/services/recruitment_api.py` → `get_history()`
-
-**Problem:** Every request makes an HTTP call to recruitment-service to load the last 20 messages. For active conversations, this is the same data each turn (plus 2 new rows).
-
-**Fix — Redis TTL cache for session history:**
-```python
-# recruitment_api.py
-import redis.asyncio as aioredis
-
-_redis: Optional[aioredis.Redis] = None
-
-async def get_history(session_id: str) -> List[Dict]:
-    cache_key = f"session_history:{session_id}"
-    
-    # Try cache first
-    if _redis:
-        cached = await _redis.get(cache_key)
-        if cached:
-            return json.loads(cached)
-    
-    # Fetch from recruitment-service
-    history = await _fetch_history_from_service(session_id)
-    
-    # Cache with 10-minute TTL
-    if _redis:
-        await _redis.setex(cache_key, 600, json.dumps(history))
-    
-    return history
-
-async def save_message(session_id: str, role: str, content: str, function_call=None):
-    # After saving, invalidate cache so next turn gets fresh history
-    await _save_message_to_service(session_id, role, content, function_call)
-    if _redis:
-        await _redis.delete(f"session_history:{session_id}")
-```
-
-**Estimated gain:** -80–150ms per request for active sessions (cache hit). Also reduces load on recruitment-service MySQL under concurrent users.
-
----
-
-## 7. Qdrant HNSW Tuning
-
-The HNSW index parameters control the speed/recall tradeoff for Approximate Nearest Neighbor (ANN) search.
-
-### Current Assumption
-Qdrant defaults: `m=16, ef_construct=100, ef=128` (search beam width)
-
-### Recommended Settings
-
-**For `cv_embeddings` (high cardinality, precision matters):**
-```python
-HnswConfigDiff(
-    m=32,              # More connections per node → better recall
-    ef_construct=200,  # Better graph at index time (one-time cost)
-)
-# At search time:
-SearchParams(hnsw_ef=128, exact=False)
-```
-
-**For `jd_embeddings` (small collection, can afford higher ef):**
-```python
-HnswConfigDiff(m=16, ef_construct=100)
-SearchParams(hnsw_ef=64, exact=False)  # JD collection is small, low ef is fine
-```
-
-**Trade-off:** Higher `m` and `ef_construct` increase index build time and memory, but are a one-time cost. Search `hnsw_ef` directly controls search speed vs recall — tune empirically.
-
----
-
-## 8. Intent Quality Improvements
-
-### IQ-01: Fuzzy Vietnamese Pattern Coverage
-
-**Problem:** Current patterns use exact keywords. Vietnamese has many variations:
-- "tìm việc" ≠ "kiếm việc" ≠ "xin việc" (all mean "find a job")
-- Typos: "tim viec", "tìm viêc"
-
-**Fix — Extend patterns (low effort, high recall improvement):**
-```python
-_JD_SEARCH_PATTERN = re.compile(
-    r"\b(tìm việc|tim viec|kiếm việc|kiem viec|xin việc|xin viec|"
-    r"tìm công việc|tim cong viec|tìm vị trí|tim vi tri|"
-    r"việc làm phù hợp|viec lam phu hop|"
-    r"công việc phù hợp|cong viec phu hop|"
-    r"job.*search|find.*job[s]?|looking.*for.*job|"
-    r"có việc nào|co viec nao|gợi ý việc|goi y viec|"
-    r"recommend.*job[s]?|job.*recommend)\b",
-    re.IGNORECASE,
-)
-```
-
-### IQ-02: Seniority Level Extraction in Router
-
-**Problem:** Router extracts skill keywords but not seniority level. "Senior Java Developer" and "Junior Java Developer" produce the same `skill_keywords = ["java"]` but should produce different retrieval signals.
-
-**Fix — Add seniority extraction:**
-```python
-_SENIORITY_PATTERNS = {
-    "junior": re.compile(r"\b(junior|intern|entry.?level|fresher|mới ra trường)\b", re.IGNORECASE),
-    "mid":    re.compile(r"\b(mid.?level|2.?3 năm|2.?3 years?)\b", re.IGNORECASE),
-    "senior": re.compile(r"\b(senior|lead|principal|architect|5\+|nhiều năm)\b", re.IGNORECASE),
-}
-
-def _extract_seniority(query: str) -> Optional[str]:
-    for level, pattern in _SENIORITY_PATTERNS.items():
-        if pattern.search(query):
-            return level
-    return None
-```
-
-Pass `seniority_level` to retriever and use it in Qdrant metadata filter:
-```python
-FieldCondition(key="seniorityLevel", match=MatchValue(value=seniority_level))
-```
-
-### IQ-03: Numeric top_k Extraction from Query
-
-**Problem:** HR asks "tìm top 5 ứng viên" or "show me 10 candidates". The `top_n` parameter must be parsed from the query for HR mode. Verify this is consistently handled in the HR router.
-
-If `top_n` parsing is done with regex in the HR router, ensure it also handles Vietnamese patterns:
-```python
-_TOP_N_PATTERN = re.compile(
-    r"top\s*(\d+)|(\d+)\s*(candidates?|ứng viên|người|profiles?)",
-    re.IGNORECASE
-)
+_EMBED_CACHE = OrderedDict()  # maxsize=512
 ```
 
 ---
 
-## 9. Implementation Roadmap
+### Sprint 3 — Quality & Scale (3–5 ngày)
 
-### Sprint 1 (1–2 days) — P1 Quick Wins
-- [ ] O5: Fix reranker `chunkText` vs `jdText` bug ← do this FIRST (silent bug)
-- [ ] O3: Eager-load reranker model at startup
-- [ ] O6: LLM singleton for expansion
-- [ ] O4: Async reranker via run_in_executor
-- [ ] O2: Fix synchronous embed_text in retriever.py
-- [ ] O11: Pre-compile skill regex patterns
-
-### Sprint 2 (2–3 days) — P2 Medium Wins  
-- [ ] O1: Parallelize CV + JD Qdrant searches (requires async Qdrant client or executor)
-- [ ] O12: Verify + create Qdrant payload indexes ← run as one-time migration
-- [ ] O9: LRU embedding cache
-- [ ] O10: JD vector cache per positionId
-- [ ] O8: Skip expansion for simple queries
-
-### Sprint 3 (3–5 days) — P2/P3 Architecture
-- [ ] O7: Expansion cache across turns (state schema change)
-- [ ] O13: Tiered scoring model (Flash → Pro)
-- [ ] O14: Conversation-aware routing (last_mentioned_jd_id)
-- [ ] IQ-01: Extend Vietnamese intent patterns
-- [ ] IQ-02: Seniority extraction in router
-
-### Sprint 4 (5–7 days) — P3 High Value
-- [ ] O15: Token streaming through LangGraph + SSE route
-- [ ] O16: Redis session cache
-- [ ] HNSW parameter tuning (requires Qdrant collection recreation or index update)
-
----
-
-## 10. Performance Monitoring
-
-After each sprint, measure:
-
-| Metric | Baseline Target | Optimized Target |
-|--------|----------------|-----------------|
-| JD_SEARCH Turn 1 P50 latency | — | ≤ 6s |
-| JD_SEARCH Turn 2+ P50 latency | — | ≤ 4s |
-| CV_ANALYSIS P50 latency | — | ≤ 3s |
-| Qdrant filtered search time | — | ≤ 50ms (with indexes) |
-| Cross-Encoder rerank time | — | ≤ 300ms (CPU) |
-| Expansion skip rate | 0% | ≥ 40% |
-| Scoring cache hit rate (Turn 2+) | — | ≥ 90% |
-| First-request cold start | 5–15s | ≤ 2s |
-
-Add timing instrumentation using Python `time.perf_counter()` per graph node and log to structured JSON logs. This enables bottleneck tracking over time.
-
+**F14: Tiered scoring**
 ```python
-# Pattern for all graph nodes:
-import time
+# scoring.py:
+def _model(query, strategy):
+    if strategy == "APPLY": return GEMINI_PRO    # guardrail phải chính xác
+    return GEMINI_FLASH                           # browsing/ranking dùng Flash
+```
 
-async def llm_reasoning_node(state):
-    t0 = time.perf_counter()
-    # ... node logic ...
-    elapsed_ms = (time.perf_counter() - t0) * 1000
-    print(f"[Timing] llm_reasoning: {elapsed_ms:.0f}ms | session={state['session_id']}")
+**F15: AND/OR compound skill**
+```python
+# router.py — detect AND intent:
+_AND = re.compile(r"\bvà\b|\band\b|\bcả\b|\bboth\b", re.I)
+skill_logic = "AND" if len(skills) >= 2 and _AND.search(query) else "OR"
+# retriever.py — AND dùng multiple must conditions thay vì MatchAny
+```
+
+**F16: Batch email parallel**
+```python
+# HR reasoning node — tool loop không break sau call đầu:
+results = await asyncio.gather(*[_send_email(args) for args in email_list])
 ```
 
 ---
 
-## 11. Risk Assessment
+### Sprint 4 — UX Improvement (5–7 ngày)
 
-| Optimization | Risk | Mitigation |
-|-------------|------|-----------|
-| O1 (parallel searches) | Qdrant connection pool exhaustion under load | Use `AsyncQdrantClient` with connection pooling |
-| O7 (expansion cache) | Stale cache if user pivots to completely new job domain | Clear cache on strategy change or high semantic distance |
-| O10 (JD vector cache) | Stale vector after HR re-uploads JD | Invalidate via JD update webhook/endpoint |
-| O13 (tiered scoring) | Flash model gives lower quality scores → worse guardrail decisions | Keep Pro for APPLY flow; Flash only for browsing/ranking |
-| O15 (streaming) | Tool-use turns (finalize_application) can't stream mid-execution | Buffer tool call turns, stream non-tool turns only |
-| O16 (Redis cache) | Cache stampede on cold session | Add jitter to TTL + use `SET NX` pattern |
+**F17: Token streaming** — User thấy tokens sau ~200ms thay vì đợi toàn bộ response.  
+Lưu ý: Buffer tool-use turns (APPLY, SEND_INTERVIEW), stream non-tool turns.
+
+**F18: Redis session cache** — Cache history với 10-min TTL, invalidate sau save_message.
+
+---
+
+## 7. System Bloat Control Principles
+
+Áp dụng xuyên suốt quá trình implement:
+
+1. **Router ≤ 50 lines** — nếu vượt, tách thành helper function, không thêm layer mới
+2. **State fields tối giản** — mỗi field mới phải có clear owner (node nào set, node nào read, node nào clear)
+3. **Prompt budget cứng** — tối đa 5 CVs/JDs trong scoring prompt, bất kể user yêu cầu bao nhiêu
+4. **Một intent = một retrieval strategy** — không có conditional retrieval trong node, chỉ trong router
+5. **Không implement category nào chỉ vì "có thể xảy ra"** — chỉ fix khi user báo bug thực tế
+6. **CV_GAP_ANALYSIS fallback rõ ràng** — nếu `last_jd_id` null → redirect FIND_JOBS, không để LLM tự đoán

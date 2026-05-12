@@ -24,6 +24,7 @@ import asyncio
 import json
 from typing import List, Tuple
 
+from typing import Optional
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 
@@ -36,6 +37,22 @@ settings = get_settings()
 # ---------------------------------------------------------------------------
 
 _EXPANSION_TIMEOUT_SECONDS = float(getattr(settings, "EXPANSION_TIMEOUT_SECONDS", 4.0))
+
+# Module-level singleton — avoids re-initialising the LLM client on every expansion call
+_LLM: Optional[ChatGoogleGenerativeAI] = None
+
+
+def _get_llm() -> ChatGoogleGenerativeAI:
+    global _LLM
+    if _LLM is None:
+        _LLM = ChatGoogleGenerativeAI(
+            model=settings.GEMINI_MODEL,
+            temperature=0.1,
+            max_output_tokens=512,
+            google_api_key=settings.GEMINI_API_KEY,
+        )
+    return _LLM
+
 
 _EXPANSION_PROMPT_TEMPLATE = """\
 You are a technical recruitment assistant.
@@ -67,22 +84,13 @@ Maximum 20 items.
  "skill_variants": ["Java", "Spring Boot", "Spring Framework", "Spring MVC", "JPA", "Hibernate", "REST", "Microservices"]}}"""
 
 
-def _build_flash_llm() -> ChatGoogleGenerativeAI:
-    return ChatGoogleGenerativeAI(
-        model=settings.GEMINI_MODEL,
-        temperature=0.1,
-        max_output_tokens=512,
-        google_api_key=settings.GEMINI_API_KEY,
-    )
-
-
 async def _call_expansion_llm(query: str, skill_keywords: List[str]) -> Tuple[str, List[str]]:
     """
     Call LLM for query expansion with a hard timeout.
     Returns (expanded_query, skill_variants).
     Raises asyncio.TimeoutError on timeout, Exception on parse failure.
     """
-    llm = _build_flash_llm()
+    llm = _get_llm()
     prompt = _EXPANSION_PROMPT_TEMPLATE.format(
         query=query,
         skill_keywords=", ".join(skill_keywords) if skill_keywords else "(none)",

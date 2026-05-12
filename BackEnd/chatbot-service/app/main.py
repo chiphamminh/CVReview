@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from app.api.routes import health, candidate_chat, hr_chat, internal
 from app.services.embedding import embedding_service
 from app.services.qdrant import qdrant_service
+from app.services.reranker import reranker
 from app.services import position_score_cache
 from app.config import get_settings
 
@@ -17,11 +18,19 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     print("Starting Chatbot Service...")
-    
+    import asyncio as _asyncio
+
     # Warm up embedding model
     print("Warming up embedding model...")
     embedding_service._load_model()
     print("Embedding model ready")
+
+    # Eager-load reranker so the first real request has no cold-start penalty
+    print("Pre-loading reranker model...")
+    loop = _asyncio.get_event_loop()
+    await loop.run_in_executor(None, reranker._get_model)
+    await loop.run_in_executor(None, lambda: reranker._get_model().predict([("warmup", "text")]))
+    print("Reranker model ready")
     
     # Test Qdrant connection
     print("Testing Qdrant connection...")

@@ -1,3 +1,4 @@
+import asyncio
 import json as _json
 from langchain_core.messages import HumanMessage
 from app.rag.hr.state import HRChatState
@@ -5,41 +6,37 @@ from app.services.recruitment_api import recruitment_api
 from app.services.retriever import get_chunk_text
 from app.rag.hr.nodes.reasoning import _build_llm, _extract_llm_text
 
-async def hr_scoring_node(state: HRChatState) -> HRChatState:
-    """
-    Scores each candidate in state['pending_scoring_candidates'] against the JD.
-    """
-    candidates = state.get("pending_scoring_candidates") or []
-    jd_context  = state.get("jd_context", [])
+_STATUS_ICON = {
+    "EXCELLENT_MATCH": "🌟",
+    "GOOD_MATCH": "✅",
+    "POTENTIAL": "🟡",
+    "POOR_FIT": "❌",
+}
 
-    if not candidates:
-        state["llm_response"] = "Không có ứng viên nào trong ngữ cảnh hiện tại để chấm điểm. Vui lòng thực hiện tìm kiếm trước."
-        state["pending_scoring_candidates"] = None
-        return state
 
-    jd_text = "\n\n".join(
-        get_chunk_text(c.get("payload", {})) for c in jd_context
-    ).strip() or "(JD not available)"
+async def _score_one(
+    candidate: dict,
+    jd_text: str,
+    cv_context: list,
+    position_id: int,
+    session_id: str,
+    llm,
+) -> dict:
+    """Score a single candidate against the JD. Designed to run concurrently via asyncio.gather."""
+    cv_id = candidate.get("cvId")
+    app_cv_id = candidate.get("appCvId")
+    name = candidate.get("candidateName", f"CV-{cv_id}")
 
-    llm = _build_llm(temperature=0.1)
-    scoring_results = []
-    saved_count = 0
-
-    for candidate in candidates:
-        cv_id   = candidate.get("cvId")
-        app_cv_id = candidate.get("appCvId")
-        name    = candidate.get("candidateName", f"CV-{cv_id}")
-
-        cv_chunks = [
-            c for c in state.get("cv_context", [])
-            if c.get("payload", {}).get("cvId") == cv_id
-        ]
-        cv_text = "\n\n".join(
-            f"[{c.get('payload',{}).get('section','?')}]\n{get_chunk_text(c.get('payload', {}))}"
+    cv_chunks = [c for c in cv_context if c.get("payload", {}).get("cvId") == cv_id]
+    cv_text = (
+        "\n\n".join(
+            f"[{c.get('payload', {}).get('section', '?')}]\n{get_chunk_text(c.get('payload', {}))}"
             for c in cv_chunks
-        ).strip() or "(CV content not available)"
+        ).strip()
+        or "(CV content not available)"
+    )
 
-        scoring_prompt = f"""You are a senior technical recruiter performing a structured CV evaluation.
+    scoring_prompt = f"""You are a senior technical recruiter performing a structured CV evaluation.
 
 ## Job Description:
 {jd_text}
@@ -57,72 +54,115 @@ Evaluate this candidate and respond with ONLY a JSON object (no markdown) in thi
 NOTE: Do NOT include learningPath. This is an HR tool for recruiter decisions, not candidate coaching.
 - Consolidate skill match/miss observations and overall feedback into the single aiAssessment field."""
 
-        print("HR scoring_prompt: ", scoring_prompt)
+    try:
+        response = await llm.ainvoke([HumanMessage(content=scoring_prompt)])
+        raw = _extract_llm_text(response.content).strip()
 
-        try:
-            response = await llm.ainvoke([HumanMessage(content=scoring_prompt)])
-            raw = _extract_llm_text(response.content).strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
 
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        score_data = _json.loads(raw)
+        saved = False
 
-            score_data = _json.loads(raw)
+        if app_cv_id:
+            try:
+                await recruitment_api.evaluate_application(
+                    app_cv_id=app_cv_id,
+                    position_id=position_id,
+                    technical_score=score_data.get("technicalScore", 0),
+                    experience_score=score_data.get("experienceScore", 0),
+                    overall_status=score_data.get("overallStatus", "POOR_FIT"),
+                    ai_assessment=score_data.get("aiAssessment", ""),
+                    learning_path=None,
+                    session_id=session_id,
+                )
+                saved = True
+            except Exception as save_err:
+                print(f"[Scoring] Failed to save score for {name}: {save_err}")
 
-            if app_cv_id:
-                try:
-                    await recruitment_api.evaluate_application(
-                        app_cv_id=app_cv_id,
-                        position_id=state["position_id"],
-                        technical_score=score_data.get("technicalScore", 0),
-                        experience_score=score_data.get("experienceScore", 0),
-                        overall_status=score_data.get("overallStatus", "POOR_FIT"),
-                        ai_assessment=score_data.get("aiAssessment", ""),
-                        learning_path=None,
-                        session_id=state["session_id"],
-                    )
-                    saved_count += 1
-                except Exception as save_err:
-                    print(f"[Scoring] Failed to save score for {name}: {save_err}")
+        status_icon = _STATUS_ICON.get(score_data.get("overallStatus", ""), "•")
+        tech_score = score_data.get("technicalScore", 0)
+        exp_score = score_data.get("experienceScore", 0)
+        match_percent = (tech_score + exp_score) // 2
+        link = (
+            f"[Xem chi tiết CV](/hr/positions/{position_id}/applications/{app_cv_id})"
+            if app_cv_id
+            else ""
+        )
+        feedback = str(score_data.get("aiAssessment", "")).replace("\n", " ").strip()
 
-            status_icon = {
-                "EXCELLENT_MATCH": "🌟",
-                "GOOD_MATCH": "✅",
-                "POTENTIAL": "🟡",
-                "POOR_FIT": "❌",
-            }.get(score_data.get("overallStatus", ""), "•")
+        return {
+            "row": f"| **{name}** | {match_percent}% {status_icon} | {feedback} | {link} |",
+            "saved": saved,
+        }
 
-            tech_score = score_data.get('technicalScore', 0)
-            exp_score = score_data.get('experienceScore', 0)
-            match_percent = (tech_score + exp_score) // 2
+    except Exception as e:
+        print(f"[Scoring] Error scoring {name}: {e}")
+        return {
+            "row": f"| **{name}** | Lỗi | Lỗi khi chấm điểm — {str(e)} | |",
+            "saved": False,
+        }
 
-            link = ""
-            if app_cv_id:
-                link = f"[Xem chi tiết CV](/hr/positions/{state['position_id']}/applications/{app_cv_id})"
 
-            # Clean feedback to ensure it fits in one line in the markdown table
-            feedback = str(score_data.get('feedback', '')).replace('\n', ' ').strip()
-            
-            scoring_results.append(
-                f"| **{name}** | {match_percent}% {status_icon} | {feedback} | {link} |"
+async def hr_scoring_node(state: HRChatState) -> HRChatState:
+    """
+    Scores all candidates in state['pending_scoring_candidates'] against the JD in parallel.
+    """
+    candidates = state.get("pending_scoring_candidates") or []
+    jd_context = state.get("jd_context", [])
+
+    if not candidates:
+        state["llm_response"] = (
+            "Không có ứng viên nào trong ngữ cảnh hiện tại để chấm điểm. Vui lòng thực hiện tìm kiếm trước."
+        )
+        state["pending_scoring_candidates"] = None
+        return state
+
+    jd_text = (
+        "\n\n".join(get_chunk_text(c.get("payload", {})) for c in jd_context).strip()
+        or "(JD not available)"
+    )
+
+    llm = _build_llm(temperature=0.1)
+
+    results = await asyncio.gather(
+        *[
+            _score_one(
+                c,
+                jd_text,
+                state.get("cv_context", []),
+                state["position_id"],
+                state["session_id"],
+                llm,
             )
-        except Exception as e:
-            scoring_results.append(f"| **{name}** | Lỗi | Lỗi khi chấm điểm — {str(e)} | |")
-            print(f"[Scoring] Error scoring {name}: {e}")
+            for c in candidates
+        ]
+    )
+
+    scoring_rows = [r["row"] for r in results]
+    saved_count = sum(1 for r in results if r["saved"])
 
     summary_header = (
-        f"\n\n📊 **Kết quả đánh giá {len(scoring_results)} ứng viên** "
-        f"(đã lưu {saved_count}/{len(scoring_results)} vào hệ thống):\n\n"
+        f"\n\n📊 **Kết quả đánh giá {len(scoring_rows)} ứng viên** "
+        f"(đã lưu {saved_count}/{len(scoring_rows)} vào hệ thống):\n\n"
         f"| Tên ứng viên | Độ phù hợp | Điểm nổi bật | Hành động |\n"
         f"|---|---|---|---|\n"
     )
-    
+
     existing_response = state.get("llm_response", "").strip()
-    new_table = summary_header + "\n".join(scoring_results)
-    
+    new_table = summary_header + "\n".join(scoring_rows)
+
     if existing_response and "📊" not in existing_response:
         state["llm_response"] = existing_response + new_table
     else:
         state["llm_response"] = new_table.strip()
+
     state["pending_scoring_candidates"] = None
-    state["function_calls"] = [{"name": "hr_scoring", "candidates_scored": len(scoring_results), "saved": saved_count}]
+    state["function_calls"] = [
+        {
+            "name": "hr_scoring",
+            "candidates_scored": len(scoring_rows),
+            "saved": saved_count,
+        }
+    ]
     return state

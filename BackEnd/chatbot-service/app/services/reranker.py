@@ -9,6 +9,7 @@ with Max Score ensures that if even one chunk in a CV is highly relevant, the en
 CV is promoted — which is the correct semantic behaviour for HR talent search.
 """
 
+import asyncio
 from typing import List, Dict, Any, Optional
 from sentence_transformers import CrossEncoder
 from app.config import get_settings
@@ -64,9 +65,13 @@ class LocalReranker:
 
         model = self._get_model()
 
-        # Build (query, chunk_text) pairs for the Cross-Encoder
+        # Build (query, chunk_text) pairs for the Cross-Encoder.
+        # JD chunks store text in 'jdText'; CV chunks use 'chunkText'.
+        def _chunk_text(p: dict) -> str:
+            return (p.get("jdText") or p.get("chunkText") or "").strip()
+
         pairs = [
-            (query, chunk.get("payload", {}).get("chunkText", ""))
+            (query, _chunk_text(chunk.get("payload", {})))
             for chunk in chunks
         ]
         rerank_scores: List[float] = model.predict(pairs).tolist()
@@ -110,6 +115,19 @@ class LocalReranker:
             f"→ top {len(top_ids)} IDs selected ({len(selected)} total chunks, field='{id_field}')"
         )
         return selected
+
+    async def rerank_and_group_async(
+        self,
+        query: str,
+        chunks: List[Dict[str, Any]],
+        id_field: str,
+        top_n: int,
+    ) -> List[Dict[str, Any]]:
+        """Non-blocking wrapper — runs rerank_and_group in a thread pool executor."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, lambda: self.rerank_and_group(query, chunks, id_field, top_n)
+        )
 
     def rerank_chunks_for_ids(
         self,
