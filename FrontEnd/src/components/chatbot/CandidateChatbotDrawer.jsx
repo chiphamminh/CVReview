@@ -37,10 +37,46 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [firstMessageId, setFirstMessageId] = useState(null);
 
+  const [drawerWidth, setDrawerWidth] = useState(500);
+  const isResizingRef = useRef(false);
+  const startXRef = useRef(0);
+  const startWidthRef = useRef(0);
+
   const messagesContainerRef = useRef(null);
   const topSentinelRef = useRef(null);
   const suppressScrollRef = useRef(false);
   const messagesEndRef = useRef(null);
+
+  // ── Resize handle ──
+  const handleResizeStart = (e) => {
+    isResizingRef.current = true;
+    startXRef.current = e.clientX;
+    startWidthRef.current = drawerWidth;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!isResizingRef.current) return;
+      const delta = startXRef.current - e.clientX;
+      const newWidth = Math.max(320, Math.min(Math.floor(window.innerWidth / 2), startWidthRef.current + delta));
+      setDrawerWidth(newWidth);
+    };
+    const handleMouseUp = () => {
+      if (!isResizingRef.current) return;
+      isResizingRef.current = false;
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── CV check: resolve hasMasterCV + cvId whenever drawer opens ──
   useEffect(() => {
@@ -126,13 +162,17 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
 
   // ── Scroll to bottom on new messages (suppressed during prepend) ──
   useEffect(() => {
-    if (!open) return;
+    if (!open || initializingSession) return;
     if (suppressScrollRef.current) {
       suppressScrollRef.current = false;
       return;
     }
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, open]);
+    const rafId = requestAnimationFrame(() => {
+      const container = messagesContainerRef.current;
+      if (container) container.scrollTop = container.scrollHeight;
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [messages, open, initializingSession]);
 
   // ── loadOlderMessages ──
   const loadOlderMessages = useCallback(async () => {
@@ -332,11 +372,24 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
         </div>
       }
       placement="right"
-      width={500}
+      width={drawerWidth}
       onClose={onClose}
       open={open}
-      styles={{ body: { display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' } }}
+      styles={{ body: { position: 'relative', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' } }}
     >
+      {/* Resize handle — drag to resize drawer width (max: 50vw) */}
+      <div
+        onMouseDown={handleResizeStart}
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 6,
+          cursor: 'col-resize',
+          zIndex: 10,
+        }}
+      />
       {renderContent()}
     </Drawer>
   );

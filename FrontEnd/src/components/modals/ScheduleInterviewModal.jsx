@@ -22,7 +22,7 @@ const ScheduleInterviewModal = ({ open, onCancel, onSave, candidateData }) => {
 
   const handleFinish = (values) => {
     onSave({
-      date: values.date.format('YYYY-MM-DDTHH:mm:ss'),
+      date: values.date.format('YYYY-MM-DD HH:mm'),
       note: values.note
     });
   };
@@ -67,9 +67,9 @@ const ScheduleInterviewModal = ({ open, onCancel, onSave, candidateData }) => {
           name="note"
           label="Notes (Optional)"
         >
-          <Input.TextArea 
-            rows={4} 
-            placeholder="E.g. Technical interview with Team Lead. Google Meet link..." 
+          <Input.TextArea
+            rows={4}
+            placeholder="E.g. Technical interview with Team Lead. Google Meet link..."
           />
         </Form.Item>
       </Form>
