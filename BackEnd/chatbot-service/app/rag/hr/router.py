@@ -76,6 +76,9 @@ _FILTER_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# AND conjunction detection — triggers AND logic when 2+ skills are present
+_AND_PATTERN = re.compile(r"\bvà\b|\band\b|\bcả\b|\bboth\b|\bđồng thời\b|\bcùng lúc\b", re.IGNORECASE)
+
 # Skill keyword extraction — broad catch for common tech/soft skills
 _TECH_SKILL_WHITELIST = frozenset({
     # Languages
@@ -145,10 +148,13 @@ def _extract_score_threshold(query: str) -> int | None:
 
 def _extract_query_entities(query: str) -> Dict[str, Any]:
     """Extract all structured entities from the raw query string."""
+    skills = _extract_skill_keywords(query)
+    skill_logic = "AND" if len(skills) >= 2 and _AND_PATTERN.search(query) else "OR"
     return {
-        "skill_keywords":    _extract_skill_keywords(query),
-        "top_n":             _extract_top_n(query),
-        "score_threshold":   _extract_score_threshold(query),
+        "skill_keywords":  skills,
+        "top_n":           _extract_top_n(query),
+        "score_threshold": _extract_score_threshold(query),
+        "skill_logic":     skill_logic,
     }
 
 

@@ -335,6 +335,7 @@ Cách kiểm tra: đếm số Gemini API calls trong logs khi chạy SEARCH_CAND
 | F16 | Batch interview email (parallel tool calls) | Medium | Low | S3 |
 | F17 | Token streaming qua SSE | High (UX) | High | S4 |
 | F18 | Redis session cache | Medium | High | S4 |
+| F19 | EXTERNAL mode: bypass scoring, dual-sort ranking | Critical (correctness) | Medium | S5 |
 
 ### 5.3 Target Latency sau optimization
 
@@ -511,6 +512,65 @@ results = await asyncio.gather(*[_send_email(args) for args in email_list])
 Lưu ý: Buffer tool-use turns (APPLY, SEND_INTERVIEW), stream non-tool turns.
 
 **F18: Redis session cache** — Cache history với 10-min TTL, invalidate sau save_message.
+
+---
+
+### Sprint 5 — Architecture Correctness: EXTERNAL Mode (1–2 ngày)
+
+**Vấn đề:** HR Chatbot EXTERNAL mode hiện re-score candidates đã có `cv_analysis` record (tạo bởi Candidate Chatbot khi apply). Dẫn đến: (1) ghi đè điểm → inconsistency, (2) lãng phí LLM call, (3) candidate thấy điểm khác với HR.
+
+**F19: EXTERNAL mode bypass scoring + dual-sort ranking**
+
+*Phần 1 — Bypass scoring trong reasoning node:*
+```python
+# hr/nodes/reasoning.py — auto-trigger scoring block
+if strategy in ("RANK", "FILTER") and not state.get("pending_scoring_candidates"):
+    if state["mode"] == "EXTERNAL":
+        # Điểm đã có trong sql_metadata từ scope_node — không score lại
+        print("[Reasoning] EXTERNAL mode → skip scoring, use existing cv_analysis scores")
+    else:
+        # INTERNAL: chưa có điểm → trigger scoring như cũ
+        state["pending_scoring_candidates"] = [...]
+```
+
+*Phần 2 — Dual-sort ranking cho EXTERNAL (trong retrieval node):*
+```python
+# hr/nodes/retrieval.py — sau khi có cv_results từ reranker
+# Primary sort: existing avg_score (fit với vị trí, static)
+# Tiebreaker:   reranker_score   (fit với câu HR đang hỏi, query-aware)
+if state["mode"] == "EXTERNAL":
+    cv_id_to_meta = state.get("cv_id_to_meta", {})
+    def _sort_key(chunk):
+        cv_id     = chunk.get("payload", {}).get("cvId")
+        meta      = cv_id_to_meta.get(cv_id, {})
+        tech      = meta.get("technicalScore", 0)
+        exp       = meta.get("experienceScore", 0)
+        avg_score = (tech + exp) / 2
+        reranker  = chunk.get("reranker_score", 0.0)
+        return (avg_score, reranker)
+
+    cv_results = sorted(cv_results, key=_sort_key, reverse=True)
+```
+
+*Phần 3 — Build prompts hiển thị điểm sẵn có (EXTERNAL):*
+```python
+# hr/nodes/prompts.py — thêm branch cho EXTERNAL mode
+if state["mode"] == "EXTERNAL":
+    # Inject bảng điểm từ cv_id_to_meta vào system_prompt
+    # LLM đọc điểm → giải thích, so sánh, gợi ý — không cần tính lại
+    scored_section = _build_external_scores_section(cv_results, cv_id_to_meta)
+    system_prompt += f"\n\n**Điểm đã được pre-screened từ hệ thống:**\n{scored_section}"
+```
+
+**Tại sao dual-sort tốt hơn chỉ dùng avg_score:**
+
+| Tình huống | avg_score only | dual-sort |
+|---|---|---|
+| HR hỏi "ai có K8s production exp?" | A=78, B=78 → thứ tự ngẫu nhiên | A=78/0.82, B=78/0.61 → A ưu tiên |
+| HR hỏi "ai lead team tốt?" | B=78, A=78 → thứ tự ngẫu nhiên | B=78/0.79, A=78/0.55 → B ưu tiên |
+| Điểm khác nhau rõ (80 vs 72) | Primary sort đã đủ | Primary sort đã đủ |
+
+Reranker score thay đổi theo từng query → cùng pool ứng viên tự động re-order theo ngữ cảnh HR đang hỏi, không cần LLM call thêm.
 
 ---
 

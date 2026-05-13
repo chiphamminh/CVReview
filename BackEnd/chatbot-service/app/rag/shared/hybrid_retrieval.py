@@ -93,11 +93,17 @@ async def _keyword_search(
     base_filters: List,
     limit: int,
     must_not_conditions: Optional[List] = None,
+    skill_keywords: Optional[List[str]] = None,
+    skill_logic: str = "OR",
 ) -> List[Dict[str, Any]]:
     """
-    Keyword search on the `skills` metadata field via Qdrant MatchAny.
+    Keyword search on the `skills` metadata field via Qdrant filter.
     Uses a zero vector (dummy) so only the filter matters — no semantic ranking here.
     score_threshold=0.0 accepts all keyword matches regardless of cosine score.
+
+    skill_logic="AND": each original skill keyword must appear in CV's skills array
+                       (multiple MatchValue conditions in must).
+    skill_logic="OR":  any expanded variant suffices (MatchAny — current default).
     """
     if not skill_variants:
         return []
@@ -105,9 +111,15 @@ async def _keyword_search(
     dim = settings.EMBEDDING_DIMENSION
     dummy_vector = [0.0] * dim
 
-    keyword_filters = list(base_filters) + [
-        FieldCondition(key="skills", match=MatchAny(any=skill_variants))
-    ]
+    if skill_logic == "AND" and skill_keywords and len(skill_keywords) >= 2:
+        # Each original skill must be present — Qdrant evaluates multiple must
+        # conditions on array fields as "array contains ALL of these values".
+        skill_conditions = [
+            FieldCondition(key="skills", match=MatchValue(value=skill))
+            for skill in skill_keywords
+        ]
+    else:
+        skill_conditions = [FieldCondition(key="skills", match=MatchAny(any=skill_variants))]
 
     results = qdrant_service.search_similar(
         collection_name=collection,
@@ -115,7 +127,7 @@ async def _keyword_search(
         limit=limit,
         score_threshold=0.0,
         filters=Filter(
-            must=keyword_filters,
+            must=list(base_filters) + skill_conditions,
             must_not=must_not_conditions or [],
         ),
     )
@@ -174,6 +186,8 @@ async def hybrid_retrieve_cv(
     top_n: int,
     score_threshold: float = 0.25,
     exclude_cv_ids: Optional[List[int]] = None,
+    skill_keywords: Optional[List[str]] = None,
+    skill_logic: str = "OR",
 ) -> List[Dict[str, Any]]:
     """
     Hybrid retrieval for CV collection: Dense + Keyword → RRF → Cross-encoder rerank.
@@ -205,7 +219,10 @@ async def hybrid_retrieve_cv(
 
     # Run dense and keyword legs in parallel
     dense_task   = _dense_search(query, collection, base_filters, dense_limit, score_threshold, must_not_conditions)
-    keyword_task = _keyword_search(skill_variants, collection, base_filters, keyword_limit, must_not_conditions)
+    keyword_task = _keyword_search(
+        skill_variants, collection, base_filters, keyword_limit, must_not_conditions,
+        skill_keywords=skill_keywords, skill_logic=skill_logic,
+    )
 
     dense_results, keyword_results = await asyncio.gather(dense_task, keyword_task)
 

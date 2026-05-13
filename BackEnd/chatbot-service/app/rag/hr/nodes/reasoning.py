@@ -30,29 +30,34 @@ async def _execute_pending_email_confirmation(
     pending_emails: list,
 ) -> HRChatState:
     """
-    Execute send_interview_email for each pending email in a single confirmed batch.
+    Execute send_interview_email for all pending emails in parallel.
     Router has already verified the query is a confirmation phrase before calling this.
     """
     tool_map   = {t.name: t for t in HR_TOOLS}
     email_tool = tool_map.get("send_interview_email")
-    results    = []
-    func_calls = []
 
-    if email_tool:
-        for pe in pending_emails:
-            try:
-                res = await email_tool.ainvoke(pe)
-                results.append(str(res))
-                func_calls.append({"name": "send_interview_email", "arguments": pe, "result": res})
-            except Exception as e:
-                err_msg = f"Lỗi khi gửi email tới {pe.get('candidate_name')}: {str(e)}"
-                results.append(err_msg)
-                func_calls.append({"name": "send_interview_email", "arguments": pe, "result": err_msg})
+    if not email_tool:
+        state["llm_response"]   = "Không tìm thấy email tool."
+        state["function_calls"] = []
+        state["pending_emails"] = None
+        return state
+
+    async def _send_one(pe: dict) -> tuple[str, dict]:
+        try:
+            res = await email_tool.ainvoke(pe)
+            return str(res), {"name": "send_interview_email", "arguments": pe, "result": res}
+        except Exception as e:
+            err_msg = f"Lỗi khi gửi email tới {pe.get('candidate_name')}: {str(e)}"
+            return err_msg, {"name": "send_interview_email", "arguments": pe, "result": err_msg}
+
+    pairs = await asyncio.gather(*[_send_one(pe) for pe in pending_emails])
+    results    = [r  for r, _  in pairs]
+    func_calls = [fc for _, fc in pairs]
 
     state["llm_response"]   = "\n".join(results)
     state["function_calls"] = func_calls
     state["pending_emails"] = None
-    print(f"[Email Confirm] Sent {len(func_calls)} email(s).")
+    print(f"[Email Confirm] Sent {len(func_calls)} email(s) in parallel.")
     return state
 
 

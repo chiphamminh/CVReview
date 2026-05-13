@@ -2,7 +2,10 @@
 Node 2.5 — Multi-dimensional CV-JD scoring.
 
 Runs only for `jd_search` intent on Turn 1 (no scoring cache).
-Uses a dedicated Pro model for higher accuracy.
+
+Model tier (F14):
+  APPLY strategy  → Pro model (guardrail accuracy is critical)
+  All others      → Flash model (browsing; cost/speed over marginal accuracy gain)
 
 MatchStatus thresholds:
   EXCELLENT_MATCH  technicalScore >= 85 AND experienceScore >= 80
@@ -21,6 +24,14 @@ from app.rag.prompts import build_cv_context
 from app.config import get_settings
 
 settings = get_settings()
+
+
+def _get_scoring_model(pipeline_strategy: str) -> str:
+    """APPLY guardrail needs Pro accuracy; all browsing intents use Flash."""
+    if pipeline_strategy == "APPLY":
+        return settings.SCORING_GEMINI_MODEL
+    return settings.GEMINI_MODEL
+
 
 _SCORING_PROMPT_TEMPLATE = """You are a strict HR scoring system. Score each CV against the provided JDs.
 
@@ -96,7 +107,8 @@ async def scoring_node(state: CandidateChatState) -> CandidateChatState:
         print("[Scoring] Cache hit — bypassing LLM scoring call.")
         return state
 
-    print(f"[Scoring] Running multi-dimensional scoring with model: {settings.SCORING_GEMINI_MODEL}...")
+    scoring_model = _get_scoring_model(state.get("pipeline_strategy", "JD_SEARCH"))
+    print(f"[Scoring] Running multi-dimensional scoring with model: {scoring_model}...")
 
     prompt = _SCORING_PROMPT_TEMPLATE.format(
         cv_profile=build_cv_context(state["cv_context"]),
@@ -104,7 +116,7 @@ async def scoring_node(state: CandidateChatState) -> CandidateChatState:
     )
 
     llm = ChatGoogleGenerativeAI(
-        model=settings.SCORING_GEMINI_MODEL,
+        model=scoring_model,
         temperature=0.0,
         max_output_tokens=1500,
         google_api_key=settings.GEMINI_API_KEY,

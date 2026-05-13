@@ -187,6 +187,8 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
     # If expansion was skipped (passthrough), these fall back to the original values.
     expanded_query = state.get("expanded_query") or query
     skill_variants = state.get("skill_variants") or []
+    skill_keywords = entities.get("skill_keywords") or []
+    skill_logic    = entities.get("skill_logic", "OR")
 
     # FIND_MORE passes currently active CV IDs as exclusion list
     exclude_ids: List[int] = active_cv_ids if strategy == "FIND_MORE" else []
@@ -213,6 +215,8 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
             base_filters=base_filters,
             top_n=top_n,
             exclude_cv_ids=exclude_ids if exclude_ids else None,
+            skill_keywords=skill_keywords,
+            skill_logic=skill_logic,
         ),
         _fetch_jd_context(position_id, query),
     )
