@@ -33,6 +33,7 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
   const streamBufferRef = useRef('');
 
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
@@ -230,12 +231,14 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
     setInputValue('');
     streamBufferRef.current = '';
     setStreamingContent('');
+    setStatusMessage('');
     setIsLoading(true);
 
     try {
       await chatbotApi.streamCandidateMessage(
         sessionId, content, user.id, cvId,
         {
+          onStatus: (status) => setStatusMessage(status),
           onToken: (token) => {
             streamBufferRef.current += token;
             setStreamingContent(streamBufferRef.current);
@@ -245,6 +248,7 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
             setMessages(prev => [...prev, { role: 'assistant', content: finalContent }]);
             streamBufferRef.current = '';
             setStreamingContent('');
+            setStatusMessage('');
           },
         }
       );
@@ -252,6 +256,7 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
       setMessages(prev => prev.slice(0, -1));
       streamBufferRef.current = '';
       setStreamingContent('');
+      setStatusMessage('');
     } finally {
       setIsLoading(false);
     }
@@ -361,7 +366,10 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
               }}>
                 {streamingContent
                   ? <ChatMarkdown>{streamingContent}</ChatMarkdown>
-                  : <span style={{ color: '#8c8c8c' }}>AI is thinking...</span>
+                  : <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Spin size="small" />
+                      <span style={{ color: '#8c8c8c' }}>{statusMessage || 'AI is thinking...'}</span>
+                    </div>
                 }
               </div>
             </div>

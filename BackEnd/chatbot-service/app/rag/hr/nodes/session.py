@@ -49,6 +49,9 @@ async def load_hr_session_history_node(state: HRChatState) -> HRChatState:
                         if "ranked_cv_list" in func_data:
                             state["ranked_cv_list"] = func_data["ranked_cv_list"]
                             print(f"[Cache Hit] Restored ranked_cv_list: {len(state['ranked_cv_list'])} entries")
+                        if "scored_cv_ids" in func_data:
+                            state["scored_cv_ids"] = func_data["scored_cv_ids"]
+                            print(f"[Cache Hit] Restored scored_cv_ids: {state['scored_cv_ids']}")
                     except json.JSONDecodeError:
                         pass
                 break

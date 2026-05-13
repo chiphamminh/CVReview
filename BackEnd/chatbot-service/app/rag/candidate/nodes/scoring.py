@@ -120,7 +120,7 @@ async def scoring_node(state: CandidateChatState) -> CandidateChatState:
         temperature=0.0,
         max_output_tokens=1500,
         google_api_key=settings.GEMINI_API_KEY,
-        model_kwargs={"thinking_config": {"thinking_budget": 0}},
+        generation_config={"thinking_config": {"thinking_budget": 0}},
     )
 
     try:

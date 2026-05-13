@@ -42,6 +42,14 @@ async def query_expansion_node(state: CandidateChatState) -> CandidateChatState:
         print(f"[Candidate Expansion] strategy={strategy} → skipped")
         return state
 
+    # Skip LLM when no skill keywords: keyword search leg returns 0 results regardless,
+    # so expansion produces no retrieval benefit and only risks the timeout penalty.
+    if not skill_keywords:
+        state["expanded_query"] = query
+        state["skill_variants"] = []
+        print(f"[Candidate Expansion] strategy={strategy} | keywords=[] → skipped (no keyword leg benefit)")
+        return state
+
     # F9: Skip expansion for follow-up JD_SEARCH turns — scored_jobs cache exists,
     # no new skill keywords in query, and query is short (conversational follow-up).
     scored_jobs = state.get("scored_jobs")

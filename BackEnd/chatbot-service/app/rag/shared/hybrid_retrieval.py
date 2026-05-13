@@ -63,7 +63,8 @@ async def _dense_search(
 ) -> List[Dict[str, Any]]:
     """
     Dense vector search using the expanded query.
-    embedding_service.embed_text is CPU-bound — run in executor to avoid blocking.
+    Both embedding (CPU-bound) and Qdrant network I/O are offloaded to the thread
+    pool executor so they don't block the asyncio event loop when called in gather().
     """
     loop = asyncio.get_running_loop()
     query_vector = await loop.run_in_executor(
@@ -77,12 +78,15 @@ async def _dense_search(
             must_not=must_not_conditions or [],
         )
 
-    results = qdrant_service.search_similar(
-        collection_name=collection,
-        query_vector=query_vector,
-        limit=limit,
-        score_threshold=score_threshold,
-        filters=qdrant_filter,
+    results = await loop.run_in_executor(
+        None,
+        lambda: qdrant_service.search_similar(
+            collection_name=collection,
+            query_vector=query_vector,
+            limit=limit,
+            score_threshold=score_threshold,
+            filters=qdrant_filter,
+        ),
     )
     return results
 
@@ -98,12 +102,8 @@ async def _keyword_search(
 ) -> List[Dict[str, Any]]:
     """
     Keyword search on the `skills` metadata field via Qdrant filter.
-    Uses a zero vector (dummy) so only the filter matters — no semantic ranking here.
-    score_threshold=0.0 accepts all keyword matches regardless of cosine score.
-
-    skill_logic="AND": each original skill keyword must appear in CV's skills array
-                       (multiple MatchValue conditions in must).
-    skill_logic="OR":  any expanded variant suffices (MatchAny — current default).
+    Qdrant network I/O is offloaded to the thread pool so it doesn't block the
+    event loop when called concurrently with _dense_search via asyncio.gather().
     """
     if not skill_variants:
         return []
@@ -112,8 +112,6 @@ async def _keyword_search(
     dummy_vector = [0.0] * dim
 
     if skill_logic == "AND" and skill_keywords and len(skill_keywords) >= 2:
-        # Each original skill must be present — Qdrant evaluates multiple must
-        # conditions on array fields as "array contains ALL of these values".
         skill_conditions = [
             FieldCondition(key="skills", match=MatchValue(value=skill))
             for skill in skill_keywords
@@ -121,14 +119,20 @@ async def _keyword_search(
     else:
         skill_conditions = [FieldCondition(key="skills", match=MatchAny(any=skill_variants))]
 
-    results = qdrant_service.search_similar(
-        collection_name=collection,
-        query_vector=dummy_vector,
-        limit=limit,
-        score_threshold=0.0,
-        filters=Filter(
-            must=list(base_filters) + skill_conditions,
-            must_not=must_not_conditions or [],
+    qdrant_filter = Filter(
+        must=list(base_filters) + skill_conditions,
+        must_not=must_not_conditions or [],
+    )
+
+    loop = asyncio.get_running_loop()
+    results = await loop.run_in_executor(
+        None,
+        lambda: qdrant_service.search_similar(
+            collection_name=collection,
+            query_vector=dummy_vector,
+            limit=limit,
+            score_threshold=0.0,
+            filters=qdrant_filter,
         ),
     )
     return results

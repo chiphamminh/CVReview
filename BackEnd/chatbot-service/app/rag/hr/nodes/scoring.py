@@ -165,4 +165,8 @@ async def hr_scoring_node(state: HRChatState) -> HRChatState:
             "saved": saved_count,
         }
     ]
+    # Track scored cvIds so FILTER turns don't re-score the same candidates
+    scored_ids: set = set(state.get("scored_cv_ids") or [])
+    scored_ids.update(c["cvId"] for c in candidates if c.get("cvId") is not None)
+    state["scored_cv_ids"] = list(scored_ids)
     return state

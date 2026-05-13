@@ -20,6 +20,8 @@ async def save_hr_turn_node(state: HRChatState) -> HRChatState:
 
         # Build the session cache dict — always written so session node can restore
         # conv_state, ranked_cv_list, and active_cv_ids on the next turn.
+        scored_cv_ids  = state.get("scored_cv_ids") or []
+
         def _base_cache() -> dict:
             cache: dict = {"conv_state": conv_state}
             if active_cv_ids:
@@ -28,6 +30,8 @@ async def save_hr_turn_node(state: HRChatState) -> HRChatState:
                 cache["ranked_cv_list"] = ranked_cv_list
             if pending_action:
                 cache["pending_action"] = pending_action
+            if scored_cv_ids:
+                cache["scored_cv_ids"] = scored_cv_ids
             return cache
 
         if raw_calls:

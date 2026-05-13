@@ -52,6 +52,7 @@ const HRChatbotPage = () => {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
   const streamBufferRef = useRef('');
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
@@ -260,6 +261,7 @@ const HRChatbotPage = () => {
     setInputValue('');
     streamBufferRef.current = '';
     setStreamingContent('');
+    setStatusMessage('');
     setIsLoading(true);
 
     try {
@@ -267,6 +269,7 @@ const HRChatbotPage = () => {
       await chatbotApi.streamHRMessage(
         currentSessionId, content, user.id, selectedPositionId, beMode,
         {
+          onStatus: (status) => setStatusMessage(status),
           onToken: (token) => {
             streamBufferRef.current += token;
             setStreamingContent(streamBufferRef.current);
@@ -276,6 +279,7 @@ const HRChatbotPage = () => {
             setMessages(prev => [...prev, { role: 'assistant', content: finalContent }]);
             streamBufferRef.current = '';
             setStreamingContent('');
+            setStatusMessage('');
           },
         }
       );
@@ -284,6 +288,7 @@ const HRChatbotPage = () => {
       setMessages(prev => prev.slice(0, -1));
       streamBufferRef.current = '';
       setStreamingContent('');
+      setStatusMessage('');
     } finally {
       setIsLoading(false);
     }
@@ -453,7 +458,10 @@ const HRChatbotPage = () => {
                 }}>
                   {streamingContent
                     ? <ChatMarkdown>{streamingContent}</ChatMarkdown>
-                    : <span style={{ color: '#8c8c8c' }}>AI is thinking...</span>
+                    : <Space>
+                        <Spin size="small" />
+                        <span style={{ color: '#8c8c8c' }}>{statusMessage || 'AI is thinking...'}</span>
+                      </Space>
                   }
                 </div>
               </div>

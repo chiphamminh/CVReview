@@ -8,7 +8,7 @@ const _CHATBOT_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080'
  * Calls onToken for each text token, onDone when the stream closes.
  * Throws on HTTP errors; AbortError is swallowed (caller controls cancel).
  */
-async function _streamPost(path, body, { onToken, onDone, signal } = {}) {
+async function _streamPost(path, body, { onToken, onDone, onStatus, signal } = {}) {
   const token = useAuthStore.getState().token
   const resp = await fetch(`${_CHATBOT_BASE}${path}`, {
     method: 'POST',
@@ -39,6 +39,7 @@ async function _streamPost(path, body, { onToken, onDone, signal } = {}) {
           const payload = JSON.parse(line.slice(6))
           if (payload.done) onDone?.(payload)
           else if (payload.token) onToken?.(payload.token)
+          else if (payload.status) onStatus?.(payload.status)
         } catch { /* ignore malformed lines */ }
       }
     }

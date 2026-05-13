@@ -24,32 +24,39 @@ def _build_llm(temperature: float = 0.3) -> ChatGoogleGenerativeAI:
         temperature=temperature,
         max_output_tokens=settings.GEMINI_MAX_TOKENS,
         google_api_key=settings.GEMINI_API_KEY,
+        # thinking_budget=0 minimises internal CoT reasoning pass (~10-15s per call).
+        # Passed via model_kwargs so it does not conflict with LangChain's internal
+        # generation_config (which owns temperature and max_output_tokens).
         model_kwargs={"thinking_config": {"thinking_budget": 0}},
     )
 
 
 def _maybe_auto_trigger_scoring(state: HRChatState) -> None:
-    """Queue scoring if strategy is RANK/FILTER and scoring not already pending."""
-    if state.get("pipeline_strategy") not in ("RANK", "FILTER"):
+    """Queue scoring only for candidates not yet scored this session."""
+    if state.get("pipeline_strategy") != "RANK":
         return
     if state.get("pending_scoring_candidates"):
         return
+    already_scored: set = set(state.get("scored_cv_ids") or [])
     cv_id_to_meta = state.get("cv_id_to_meta", {})
     cv_ids_in_ctx: set = {
         chunk.get("payload", {}).get("cvId")
         for chunk in state.get("cv_context", [])
         if chunk.get("payload", {}).get("cvId") is not None
     }
-    if cv_ids_in_ctx:
+    new_cv_ids = cv_ids_in_ctx - already_scored
+    if new_cv_ids:
         state["pending_scoring_candidates"] = [
             {
                 "cvId":          cv_id,
                 "appCvId":       cv_id_to_meta.get(cv_id, {}).get("appCvId"),
                 "candidateName": cv_id_to_meta.get(cv_id, {}).get("candidateName", f"CV-{cv_id}"),
             }
-            for cv_id in cv_ids_in_ctx
+            for cv_id in new_cv_ids
         ]
-        print(f"[Reasoning] Auto-triggering scoring for {len(state['pending_scoring_candidates'])} candidates (strategy={state['pipeline_strategy']})")
+        print(f"[Reasoning] Auto-triggering scoring for {len(state['pending_scoring_candidates'])} NEW candidates (strategy={state['pipeline_strategy']})")
+    else:
+        print(f"[Reasoning] Skip scoring — all {len(cv_ids_in_ctx)} candidate(s) already scored this session")
 
 
 async def _execute_pending_email_confirmation(

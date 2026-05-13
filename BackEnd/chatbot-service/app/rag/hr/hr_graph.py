@@ -42,6 +42,9 @@ The conditional edge _route_after_router handles this branch.
 """
 
 import json
+import time
+import asyncio
+import functools
 from typing import Literal, Dict, Any, AsyncGenerator
 from langgraph.graph import StateGraph, END
 
@@ -56,6 +59,26 @@ from app.rag.hr.nodes.reasoning import llm_hr_reasoning_node
 from app.rag.hr.nodes.scoring import hr_scoring_node
 from app.rag.hr.nodes.persistence import save_hr_turn_node
 from app.rag.hr.nodes.formatting import format_hr_response_node
+
+
+def _timed(name: str, fn):
+    """Wrap a sync or async node function with wall-clock timing output."""
+    if asyncio.iscoroutinefunction(fn):
+        @functools.wraps(fn)
+        async def _async(state):
+            t0 = time.perf_counter()
+            result = await fn(state)
+            print(f"[TIMER][HR] {name}: {time.perf_counter() - t0:.2f}s")
+            return result
+        return _async
+    else:
+        @functools.wraps(fn)
+        def _sync(state):
+            t0 = time.perf_counter()
+            result = fn(state)
+            print(f"[TIMER][HR] {name}: {time.perf_counter() - t0:.2f}s")
+            return result
+        return _sync
 
 
 def _extract_text_token(chunk) -> str:
@@ -74,6 +97,18 @@ def _extract_text_token(chunk) -> str:
 # Strategies that require LLM query expansion before Qdrant retrieval.
 # Must stay in sync with _EXPANSION_STRATEGIES in hr/nodes/expansion.py.
 _EXPANSION_STRATEGIES = {"RANK", "FILTER", "FIND_MORE"}
+
+# Status messages emitted as SSE events when each heavy node starts.
+# Node-based (not intent-based): each intent only visits the nodes it needs,
+# so messages appear automatically for relevant stages and never for skipped ones.
+_NODE_STATUS: dict[str, str] = {
+    "load_hr_session_history": "Đang tải lịch sử phiên...",
+    "load_candidate_scope":    "Đang tải danh sách ứng viên...",
+    "query_expansion":         "Đang phân tích từ khoá tìm kiếm...",
+    "retrieve_hr_context":     "Đang tìm kiếm ứng viên phù hợp...",
+    "llm_hr_reasoning":        "Đang phân tích và tổng hợp kết quả...",
+    "hr_scoring":              "Đang đánh giá và chấm điểm ứng viên...",
+}
 
 
 def _route_after_router(state: HRChatState) -> str:
@@ -101,17 +136,18 @@ def _route_after_reasoning(state: HRChatState) -> str:
 def create_hr_graph():
     workflow = StateGraph(HRChatState)
 
-    # Register nodes
-    workflow.add_node("load_hr_session_history", load_hr_session_history_node)
-    workflow.add_node("load_candidate_scope",    load_candidate_scope_node)
-    workflow.add_node("route_hr_intent",         route_hr_intent_node)
-    workflow.add_node("query_expansion",         query_expansion_node)
-    workflow.add_node("retrieve_hr_context",     retrieve_hr_context_node)
-    workflow.add_node("build_hr_prompts",        build_hr_prompts_node)
-    workflow.add_node("llm_hr_reasoning",        llm_hr_reasoning_node)
-    workflow.add_node("hr_scoring",              hr_scoring_node)
-    workflow.add_node("save_hr_turn",            save_hr_turn_node)
-    workflow.add_node("format_hr_response",      format_hr_response_node)
+    # Register nodes — each wrapped with _timed() to log wall-clock duration per node.
+    # Check the server console for [TIMER][HR] lines to locate the bottleneck.
+    workflow.add_node("load_hr_session_history", _timed("load_hr_session_history", load_hr_session_history_node))
+    workflow.add_node("load_candidate_scope",    _timed("load_candidate_scope",    load_candidate_scope_node))
+    workflow.add_node("route_hr_intent",         _timed("route_hr_intent",         route_hr_intent_node))
+    workflow.add_node("query_expansion",         _timed("query_expansion",         query_expansion_node))
+    workflow.add_node("retrieve_hr_context",     _timed("retrieve_hr_context",     retrieve_hr_context_node))
+    workflow.add_node("build_hr_prompts",        _timed("build_hr_prompts",        build_hr_prompts_node))
+    workflow.add_node("llm_hr_reasoning",        _timed("llm_hr_reasoning",        llm_hr_reasoning_node))
+    workflow.add_node("hr_scoring",              _timed("hr_scoring",              hr_scoring_node))
+    workflow.add_node("save_hr_turn",            _timed("save_hr_turn",            save_hr_turn_node))
+    workflow.add_node("format_hr_response",      _timed("format_hr_response",      format_hr_response_node))
 
     # Linear head: session → scope → router
     workflow.set_entry_point("load_hr_session_history")
@@ -188,6 +224,7 @@ class HRChatbot:
             "query_entities":             {},
             "expanded_query":             None,
             "skill_variants":             [],
+            "scored_cv_ids":              [],
         }
 
         final_state = await self.graph.ainvoke(initial_state, {"recursion_limit": 50})
@@ -233,24 +270,32 @@ class HRChatbot:
             "query_entities":             {},
             "expanded_query":             None,
             "skill_variants":             [],
+            "scored_cv_ids":              [],
         }
 
         final_answer    = ""
         final_metadata: Dict[str, Any] = {}
+        _sent_statuses: set[str] = set()
 
         async for event in self.graph.astream_events(
             initial_state, version="v2", config={"recursion_limit": 50}
         ):
-            if (
-                event["event"] == "on_chat_model_stream"
-                and event.get("metadata", {}).get("langgraph_node") == "llm_hr_reasoning"
-            ):
+            event_type = event["event"]
+            node       = event.get("metadata", {}).get("langgraph_node", "")
+
+            if event_type == "on_chain_start" and node not in _sent_statuses:
+                status = _NODE_STATUS.get(node)
+                if status:
+                    _sent_statuses.add(node)
+                    yield f"data: {json.dumps({'status': status}, ensure_ascii=False)}\n\n"
+
+            elif event_type == "on_chat_model_stream" and node == "llm_hr_reasoning":
                 token = _extract_text_token(event["data"]["chunk"])
                 if token:
                     yield f"data: {json.dumps({'token': token})}\n\n"
 
-            elif event["event"] == "on_chain_end" and event.get("name") == "LangGraph":
-                output       = event["data"].get("output") or {}
+            elif event_type == "on_chain_end" and event.get("name") == "LangGraph":
+                output         = event["data"].get("output") or {}
                 final_answer   = output.get("final_answer", "")
                 final_metadata = output.get("metadata", {})
 

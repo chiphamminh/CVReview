@@ -62,3 +62,6 @@ class HRChatState(TypedDict):
 
     # F13 — Ranked candidate list for ordinal resolution ("người thứ 2" → cvId)
     ranked_cv_list: Optional[List[Dict[str, Any]]]  # [{"rank":1,"cvId":12,"name":"Nguyen A"}]
+
+    # Tracks cvIds that have been scored this session — prevents re-scoring on FILTER turns
+    scored_cv_ids: List[int]

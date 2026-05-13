@@ -68,7 +68,9 @@ class LocalReranker:
         # Build (query, chunk_text) pairs for the Cross-Encoder.
         # JD chunks store text in 'jdText'; CV chunks use 'chunkText'.
         def _chunk_text(p: dict) -> str:
-            return (p.get("jdText") or p.get("chunkText") or "").strip()
+            text = (p.get("jdText") or p.get("chunkText") or "").strip()
+            words = text.split()
+            return " ".join(words[:100]) if len(words) > 100 else text
 
         pairs = [
             (query, _chunk_text(chunk.get("payload", {})))

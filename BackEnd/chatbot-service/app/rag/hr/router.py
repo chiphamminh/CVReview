@@ -58,7 +58,8 @@ _AGGREGATE_PATTERN = re.compile(
 )
 
 _ACTION_PATTERN = re.compile(
-    r"\b(gửi email|gui email|send email|phỏng vấn|phong van|invite|"
+    r"\b(gửi email|gui email|send email|gửi mail|gui mail|email cho|mail cho|"
+    r"phỏng vấn|phong van|invite|"
     r"từ chối|tu choi|reject|offer|thông báo|thong bao|liên hệ|lien he)\b",
     re.IGNORECASE,
 )
