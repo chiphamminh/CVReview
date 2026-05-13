@@ -1,3 +1,5 @@
+import asyncio
+
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -21,8 +23,33 @@ def _build_llm(temperature: float = 0.3) -> ChatGoogleGenerativeAI:
         model=settings.GEMINI_MODEL,
         temperature=temperature,
         max_output_tokens=settings.GEMINI_MAX_TOKENS,
-        google_api_key=settings.GEMINI_API_KEY
+        google_api_key=settings.GEMINI_API_KEY,
+        model_kwargs={"thinking_config": {"thinking_budget": 0}},
     )
+
+
+def _maybe_auto_trigger_scoring(state: HRChatState) -> None:
+    """Queue scoring if strategy is RANK/FILTER and scoring not already pending."""
+    if state.get("pipeline_strategy") not in ("RANK", "FILTER"):
+        return
+    if state.get("pending_scoring_candidates"):
+        return
+    cv_id_to_meta = state.get("cv_id_to_meta", {})
+    cv_ids_in_ctx: set = {
+        chunk.get("payload", {}).get("cvId")
+        for chunk in state.get("cv_context", [])
+        if chunk.get("payload", {}).get("cvId") is not None
+    }
+    if cv_ids_in_ctx:
+        state["pending_scoring_candidates"] = [
+            {
+                "cvId":          cv_id,
+                "appCvId":       cv_id_to_meta.get(cv_id, {}).get("appCvId"),
+                "candidateName": cv_id_to_meta.get(cv_id, {}).get("candidateName", f"CV-{cv_id}"),
+            }
+            for cv_id in cv_ids_in_ctx
+        ]
+        print(f"[Reasoning] Auto-triggering scoring for {len(state['pending_scoring_candidates'])} candidates (strategy={state['pipeline_strategy']})")
 
 
 async def _execute_pending_email_confirmation(
@@ -86,7 +113,12 @@ async def llm_hr_reasoning_node(state: HRChatState) -> HRChatState:
         HumanMessage(content=state["user_prompt"])
     ]
 
-    response = await llm.ainvoke(messages)
+    # Use astream so astream_events can emit on_chat_model_stream token events.
+    # Accumulate chunks into a single AIMessageChunk (same interface as AIMessage).
+    response = None
+    async for chunk in llm.astream(messages):
+        response = chunk if response is None else response + chunk
+
     state["function_calls"] = None
 
     # No tool calls → plain text answer
@@ -96,6 +128,8 @@ async def llm_hr_reasoning_node(state: HRChatState) -> HRChatState:
         if strategy == "ACTION" and pending_emails:
             print("[Reasoning] ACTION but no confirmation phrase detected — clearing pending_emails.")
             state["pending_emails"] = None
+        # Fire scoring even when LLM answers directly from CV context (no tool call needed)
+        _maybe_auto_trigger_scoring(state)
         return state
 
     # --- Tool execution loop ---
@@ -197,28 +231,14 @@ async def llm_hr_reasoning_node(state: HRChatState) -> HRChatState:
 
     state["function_calls"] = executed_calls
 
-    # Second LLM call to synthesise tool results into a natural language response
+    # Second LLM call to synthesise tool results — astream so tokens are captured.
     llm_no_tools   = _build_llm(temperature=0.3)
-    final_response = await llm_no_tools.ainvoke(messages)
-    state["llm_response"] = _extract_llm_text(final_response.content)
+    final_response = None
+    async for chunk in llm_no_tools.astream(messages):
+        final_response = chunk if final_response is None else final_response + chunk
+    state["llm_response"] = _extract_llm_text(final_response.content) if final_response else ""
 
-    # Auto-trigger scoring if HR requested RANK or FILTER and we have fetched CVs
-    if strategy in ("RANK", "FILTER") and not state.get("pending_scoring_candidates"):
-        cv_id_to_meta  = state.get("cv_id_to_meta", {})
-        cv_ids_in_ctx: set = {
-            chunk.get("payload", {}).get("cvId")
-            for chunk in state.get("cv_context", [])
-            if chunk.get("payload", {}).get("cvId") is not None
-        }
-        if cv_ids_in_ctx:
-            state["pending_scoring_candidates"] = [
-                {
-                    "cvId":          cv_id,
-                    "appCvId":       cv_id_to_meta.get(cv_id, {}).get("appCvId"),
-                    "candidateName": cv_id_to_meta.get(cv_id, {}).get("candidateName", f"CV-{cv_id}"),
-                }
-                for cv_id in cv_ids_in_ctx
-            ]
-            print(f"[Reasoning] Auto-triggering scoring for {len(state['pending_scoring_candidates'])} candidates (strategy={strategy})")
+    # Fire scoring if evaluate_candidates was not explicitly called during tool loop
+    _maybe_auto_trigger_scoring(state)
 
     return state

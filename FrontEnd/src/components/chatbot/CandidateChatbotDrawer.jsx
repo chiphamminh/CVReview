@@ -32,6 +32,8 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [streamingContent, setStreamingContent] = useState('');
+  const streamBufferRef = useRef('');
 
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -219,20 +221,37 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
     return () => observer.disconnect();
   }, [open, hasOlderMessages, loadingOlder, loadOlderMessages]);
 
-  // ── Send message ──
+  // ── Send message (SSE streaming) ──
   const handleSend = async (text = inputValue) => {
     const content = text.trim();
     if (!content || !sessionId) return;
 
     setMessages(prev => [...prev, { role: 'user', content }]);
     setInputValue('');
+    streamBufferRef.current = '';
+    setStreamingContent('');
     setIsLoading(true);
 
     try {
-      const res = await chatbotApi.sendCandidateMessage(sessionId, content, user.id, cvId);
-      setMessages(prev => [...prev, { role: 'assistant', content: res.answer }]);
+      await chatbotApi.streamCandidateMessage(
+        sessionId, content, user.id, cvId,
+        {
+          onToken: (token) => {
+            streamBufferRef.current += token;
+            setStreamingContent(streamBufferRef.current);
+          },
+          onDone: ({ fallback_answer }) => {
+            const finalContent = fallback_answer || streamBufferRef.current || '';
+            setMessages(prev => [...prev, { role: 'assistant', content: finalContent }]);
+            streamBufferRef.current = '';
+            setStreamingContent('');
+          },
+        }
+      );
     } catch {
       setMessages(prev => prev.slice(0, -1));
+      streamBufferRef.current = '';
+      setStreamingContent('');
     } finally {
       setIsLoading(false);
     }
@@ -332,8 +351,19 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
 
           {isLoading && (
             <div style={{ display: 'flex', gap: '12px' }}>
-              <Avatar icon={<RobotOutlined />} style={{ backgroundColor: '#52c41a' }} />
-              <div style={{ padding: '10px 14px', color: '#8c8c8c' }}>AI is thinking...</div>
+              <Avatar icon={<RobotOutlined />} style={{ backgroundColor: '#52c41a', flexShrink: 0 }} />
+              <div style={{
+                maxWidth: '80%',
+                padding: '10px 14px',
+                borderRadius: '8px',
+                backgroundColor: '#f5f5f5',
+                border: '1px solid #d9d9d9',
+              }}>
+                {streamingContent
+                  ? <ChatMarkdown>{streamingContent}</ChatMarkdown>
+                  : <span style={{ color: '#8c8c8c' }}>AI is thinking...</span>
+                }
+              </div>
             </div>
           )}
           <div ref={messagesEndRef} />

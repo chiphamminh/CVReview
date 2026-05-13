@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 
@@ -53,3 +54,18 @@ async def candidate_chat(request: ChatRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/candidate/chat/stream", tags=["Candidate Chatbot"])
+async def candidate_chat_stream(request: ChatRequest):
+    """Stream Candidate chatbot tokens via Server-Sent Events."""
+    return StreamingResponse(
+        candidate_chatbot.stream_chat(
+            query=request.query,
+            session_id=request.session_id,
+            candidate_id=request.candidate_id,
+            cv_id=request.cv_id,
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

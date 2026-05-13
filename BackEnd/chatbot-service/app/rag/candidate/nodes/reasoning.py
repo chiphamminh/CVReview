@@ -49,6 +49,7 @@ async def llm_reasoning_node(state: CandidateChatState) -> CandidateChatState:
         temperature=temperature,
         max_output_tokens=settings.GEMINI_MAX_TOKENS,
         google_api_key=settings.GEMINI_API_KEY,
+        model_kwargs={"thinking_config": {"thinking_budget": 0}},
     ).bind_tools(CANDIDATE_TOOLS)
 
     messages = [
@@ -56,8 +57,12 @@ async def llm_reasoning_node(state: CandidateChatState) -> CandidateChatState:
         HumanMessage(content=state["user_prompt"]),
     ]
 
-    response = await llm.ainvoke(messages)
-    state["llm_response"]   = _extract_llm_text(response.content)
+    # Use astream so astream_events can emit on_chat_model_stream token events.
+    response = None
+    async for chunk in llm.astream(messages):
+        response = chunk if response is None else response + chunk
+
+    state["llm_response"]   = _extract_llm_text(response.content) if response else ""
     state["function_calls"] = None
 
     if not response.tool_calls:
@@ -108,9 +113,12 @@ async def llm_reasoning_node(state: CandidateChatState) -> CandidateChatState:
             temperature=temperature,
             max_output_tokens=settings.GEMINI_MAX_TOKENS,
             google_api_key=settings.GEMINI_API_KEY,
+            model_kwargs={"thinking_config": {"thinking_budget": 0}},
         )
-        second_response = await llm_no_tools.ainvoke(messages)
-        state["llm_response"] = _extract_llm_text(second_response.content)
+        second_response = None
+        async for chunk in llm_no_tools.astream(messages):
+            second_response = chunk if second_response is None else second_response + chunk
+        state["llm_response"] = _extract_llm_text(second_response.content) if second_response else ""
 
     return state
 

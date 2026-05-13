@@ -41,7 +41,8 @@ route_hr_intent and retrieve_hr_context.
 The conditional edge _route_after_router handles this branch.
 """
 
-from typing import Literal, Dict, Any
+import json
+from typing import Literal, Dict, Any, AsyncGenerator
 from langgraph.graph import StateGraph, END
 
 from app.rag.hr.state import HRChatState
@@ -55,6 +56,20 @@ from app.rag.hr.nodes.reasoning import llm_hr_reasoning_node
 from app.rag.hr.nodes.scoring import hr_scoring_node
 from app.rag.hr.nodes.persistence import save_hr_turn_node
 from app.rag.hr.nodes.formatting import format_hr_response_node
+
+
+def _extract_text_token(chunk) -> str:
+    """Return plain text from an AIMessageChunk, skipping tool-call blocks."""
+    content = chunk.content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return ""
 
 # Strategies that require LLM query expansion before Qdrant retrieval.
 # Must stay in sync with _EXPANSION_STRATEGIES in hr/nodes/expansion.py.
@@ -181,6 +196,65 @@ class HRChatbot:
             "answer":   final_state["final_answer"],
             "metadata": final_state["metadata"],
         }
+
+    async def stream_chat(
+        self,
+        query: str,
+        session_id: str,
+        hr_id: str,
+        position_id: int,
+        mode: Literal["INTERNAL", "EXTERNAL"],
+    ) -> AsyncGenerator[str, None]:
+        initial_state: HRChatState = {
+            "query":                      query,
+            "hr_id":                      hr_id,
+            "session_id":                 session_id,
+            "position_id":                position_id,
+            "mode":                       mode,
+            "is_cv_count_query":          False,
+            "sql_metadata":               [],
+            "cv_id_to_meta":              {},
+            "pending_emails":             None,
+            "pending_scoring_candidates": None,
+            "conversation_history":       [],
+            "active_cv_ids":              [],
+            "hr_query_intent":            "RANK",
+            "cv_context":                 [],
+            "jd_context":                 [],
+            "retrieval_stats":            {},
+            "system_prompt":              "",
+            "user_prompt":                "",
+            "llm_response":               "",
+            "function_calls":             None,
+            "final_answer":               "",
+            "metadata":                   {},
+            "pipeline_strategy":          "",
+            "query_intent":               "",
+            "query_entities":             {},
+            "expanded_query":             None,
+            "skill_variants":             [],
+        }
+
+        final_answer    = ""
+        final_metadata: Dict[str, Any] = {}
+
+        async for event in self.graph.astream_events(
+            initial_state, version="v2", config={"recursion_limit": 50}
+        ):
+            if (
+                event["event"] == "on_chat_model_stream"
+                and event.get("metadata", {}).get("langgraph_node") == "llm_hr_reasoning"
+            ):
+                token = _extract_text_token(event["data"]["chunk"])
+                if token:
+                    yield f"data: {json.dumps({'token': token})}\n\n"
+
+            elif event["event"] == "on_chain_end" and event.get("name") == "LangGraph":
+                output       = event["data"].get("output") or {}
+                final_answer   = output.get("final_answer", "")
+                final_metadata = output.get("metadata", {})
+
+        yield f"data: {json.dumps({'done': True, 'metadata': final_metadata, 'fallback_answer': final_answer})}\n\n"
 
 
 hr_chatbot = HRChatbot()

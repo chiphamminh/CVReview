@@ -33,6 +33,29 @@ _STRATEGY_HINTS: dict[str, str] = {
 }
 
 
+def _build_candidate_action_instruction(strategy: str) -> str:
+    """
+    Return the strategy-specific instruction line for candidate search/rank/filter.
+
+    RANK: LLM reads CV chunks from context and answers directly — no DB tool call needed.
+          Scoring is auto-triggered by the graph after reasoning completes.
+    FILTER: HR is filtering by score/skill/name criteria stored in MySQL, not Qdrant,
+            so search_candidates_by_criteria must query the DB.
+    Others: No ranking-related instruction injected.
+    """
+    if strategy == "RANK":
+        return (
+            "- Rank and analyse candidates using ONLY the CV data already provided in the context below. "
+            "Do NOT call `search_candidates_by_criteria` — AI scoring will run automatically after your response.\n"
+        )
+    if strategy == "FILTER":
+        return (
+            "- To filter candidates by score, skill, or name criteria: invoke `search_candidates_by_criteria` "
+            "with the appropriate parameters.\n"
+        )
+    return ""
+
+
 def build_hr_prompts_node(state: HRChatState) -> HRChatState:
     """Assemble system + user prompts for the HR LLM call, adapted by pipeline_strategy."""
     strategy     = state.get("pipeline_strategy", "RANK")
@@ -77,6 +100,8 @@ def build_hr_prompts_node(state: HRChatState) -> HRChatState:
 
     strategy_hint = _STRATEGY_HINTS.get(strategy, "")
 
+    _candidate_action_instruction = _build_candidate_action_instruction(strategy)
+
     system_prompt = (
         f"You are a Senior HR Talent Acquisition Specialist assisting with recruitment decisions.\n"
         f"Current mode: {mode_label} | Position: {position_name} (ID: {state['position_id']})\n"
@@ -86,8 +111,7 @@ def build_hr_prompts_node(state: HRChatState) -> HRChatState:
         f"- When HR requests to send an email: FIRST confirm the recipient name and email address before invoking send_interview_email.\n"
         f"- When HR requests detailed candidate information, invoke the `get_candidate_details` tool.\n"
         f"- When HR asks about CV count or statistics, invoke the `get_cv_summary` tool.\n"
-        f"- When HR wants to filter/rank candidates, invoke the `search_candidates_by_criteria` tool.\n"
-        f"- When HR requests to list, filter, rank, or evaluate candidates, ALWAYS invoke the `evaluate_candidates` tool after fetching the candidates.\n"
+        f"{_candidate_action_instruction}"
         f"- NEVER reveal raw UUIDs or system IDs to HR in your response.\n"
         f"{_ADAPTIVE_INSTRUCTION}{strategy_hint}{pending_note}"
     )

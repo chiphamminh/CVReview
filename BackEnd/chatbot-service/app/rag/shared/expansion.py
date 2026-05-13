@@ -50,6 +50,7 @@ def _get_llm() -> ChatGoogleGenerativeAI:
             temperature=0.1,
             max_output_tokens=512,
             google_api_key=settings.GEMINI_API_KEY,
+            model_kwargs={"thinking_config": {"thinking_budget": 0}},
         )
     return _LLM
 

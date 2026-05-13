@@ -4,6 +4,7 @@ FE calls these endpoints (via API Gateway) to create HR sessions and send messag
 """
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Literal, Dict, Any
 
@@ -74,3 +75,19 @@ async def hr_chat(request: HRChatRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/hr/chat/stream", tags=["HR Chatbot"])
+async def hr_chat_stream(request: HRChatRequest):
+    """Stream HR chatbot tokens via Server-Sent Events."""
+    return StreamingResponse(
+        hr_chatbot.stream_chat(
+            query=request.query,
+            session_id=request.session_id,
+            hr_id=request.hr_id,
+            position_id=request.position_id,
+            mode=request.mode,
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

@@ -33,7 +33,8 @@ Graph topology (Sprint 2 — Intent-Aware Routing + Hybrid Retrieval):
         format_response → END
 """
 
-from typing import Literal, Optional, Dict, Any
+import json
+from typing import Literal, Optional, Dict, Any, AsyncGenerator
 from langgraph.graph import StateGraph, END
 
 from app.rag.candidate.state import CandidateChatState
@@ -46,6 +47,20 @@ from app.rag.candidate.nodes.prompts import build_prompts_node
 from app.rag.candidate.nodes.reasoning import llm_reasoning_node
 from app.rag.candidate.nodes.persistence import save_turn_node
 from app.rag.candidate.nodes.formatting import format_response_node
+
+
+def _extract_text_token(chunk) -> str:
+    """Return plain text from an AIMessageChunk, skipping tool-call blocks."""
+    content = chunk.content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return ""
 
 
 def _route_after_router(state: CandidateChatState) -> Literal["query_expansion", "retrieve_context"]:
@@ -141,6 +156,64 @@ class CandidateChatbot:
             "answer":   final_state["final_answer"],
             "metadata": final_state["metadata"],
         }
+
+    async def stream_chat(
+        self,
+        query: str,
+        session_id: str,
+        candidate_id: str,
+        cv_id: Optional[int] = None,
+    ) -> AsyncGenerator[str, None]:
+        initial_state: CandidateChatState = {
+            "query":                query,
+            "session_id":           session_id,
+            "candidate_id":         candidate_id,
+            "cv_id":                cv_id,
+            "jd_id":                None,
+            "conversation_history": [],
+            "active_position_ids":  None,
+            "position_ref_map":     {},
+            "cv_context":           [],
+            "jd_context":           [],
+            "retrieval_stats":      {},
+            "scored_jobs":          None,
+            "pipeline_strategy":    "",
+            "query_intent":         "",
+            "query_entities":       {},
+            "expanded_query":       None,
+            "skill_variants":       [],
+            "intent":               "general",
+            "intent_confidence":    0.0,
+            "domain":               "candidate",
+            "is_apply_intent":      False,
+            "system_prompt":        "",
+            "user_prompt":          "",
+            "llm_response":         "",
+            "function_calls":       None,
+            "final_answer":         "",
+            "metadata":             {},
+        }
+
+        final_answer    = ""
+        final_metadata: Dict[str, Any] = {}
+
+        async for event in self.graph.astream_events(
+            initial_state, version="v2", config={"recursion_limit": 50}
+        ):
+            if (
+                event["event"] == "on_chat_model_stream"
+                and event.get("metadata", {}).get("langgraph_node") == "llm_reasoning"
+            ):
+                token = _extract_text_token(event["data"]["chunk"])
+                if token:
+                    yield f"data: {json.dumps({'token': token})}\n\n"
+
+            elif event["event"] == "on_chain_end" and event.get("name") == "LangGraph":
+                output         = event["data"].get("output") or {}
+                final_answer   = output.get("final_answer", "")
+                final_metadata = output.get("metadata", {})
+
+        yield f"data: {json.dumps({'done': True, 'metadata': final_metadata, 'fallback_answer': final_answer})}\n\n"
 
 
 candidate_chatbot = CandidateChatbot()

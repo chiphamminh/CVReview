@@ -43,9 +43,16 @@ const HRChatbotPage = () => {
   } = useChatbotStore();
   const selectedPositionId = urlPositionId ? parseInt(urlPositionId) : storedPositionId;
 
+  // Sync URL position → Zustand so it survives back-navigation to /hr/chatbot (no ID in URL)
+  useEffect(() => {
+    if (urlPositionId) setSelectedPositionId(parseInt(urlPositionId));
+  }, [urlPositionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [streamingContent, setStreamingContent] = useState('');
+  const streamBufferRef = useRef('');
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -240,7 +247,7 @@ const HRChatbotPage = () => {
     }
   };
 
-  // ── Send message ──
+  // ── Send message (SSE streaming) ──
   const handleSend = async () => {
     const content = inputValue.trim();
     if (!content) return;
@@ -251,17 +258,32 @@ const HRChatbotPage = () => {
 
     setMessages(prev => [...prev, { role: 'user', content }]);
     setInputValue('');
+    streamBufferRef.current = '';
+    setStreamingContent('');
     setIsLoading(true);
 
     try {
       const beMode = mode === 'Internal' ? 'INTERNAL' : 'EXTERNAL';
-      const res = await chatbotApi.sendHRMessage(
-        currentSessionId, content, user.id, selectedPositionId, beMode
+      await chatbotApi.streamHRMessage(
+        currentSessionId, content, user.id, selectedPositionId, beMode,
+        {
+          onToken: (token) => {
+            streamBufferRef.current += token;
+            setStreamingContent(streamBufferRef.current);
+          },
+          onDone: ({ fallback_answer }) => {
+            const finalContent = fallback_answer || streamBufferRef.current || '';
+            setMessages(prev => [...prev, { role: 'assistant', content: finalContent }]);
+            streamBufferRef.current = '';
+            setStreamingContent('');
+          },
+        }
       );
-      setMessages(prev => [...prev, { role: 'assistant', content: res.answer }]);
     } catch {
       antMessage.error('Failed to send message');
       setMessages(prev => prev.slice(0, -1));
+      streamBufferRef.current = '';
+      setStreamingContent('');
     } finally {
       setIsLoading(false);
     }
@@ -421,8 +443,19 @@ const HRChatbotPage = () => {
 
             {isLoading && (
               <div style={{ display: 'flex', gap: '12px' }}>
-                <Avatar icon={<RobotOutlined />} style={{ backgroundColor: '#52c41a' }} />
-                <div style={{ padding: '12px', color: '#8c8c8c' }}>AI is thinking...</div>
+                <Avatar icon={<RobotOutlined />} style={{ backgroundColor: '#52c41a', flexShrink: 0 }} />
+                <div style={{
+                  maxWidth: '70%',
+                  padding: '12px 16px',
+                  borderRadius: '8px',
+                  backgroundColor: '#f5f5f5',
+                  border: '1px solid #d9d9d9',
+                }}>
+                  {streamingContent
+                    ? <ChatMarkdown>{streamingContent}</ChatMarkdown>
+                    : <span style={{ color: '#8c8c8c' }}>AI is thinking...</span>
+                  }
+                </div>
               </div>
             )}
             <div ref={messagesEndRef} />
