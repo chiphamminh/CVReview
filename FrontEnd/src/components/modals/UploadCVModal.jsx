@@ -17,12 +17,6 @@ const { Text, Title } = Typography;
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
-const formatElapsed = (seconds) => {
-  const m = String(Math.floor(seconds / 60)).padStart(2, '0');
-  const s = String(seconds % 60).padStart(2, '0');
-  return `${m}:${s}`;
-};
-
 const UploadCVModal = ({ open, onCancel, positionId, positionName }) => {
   const { message } = App.useApp();
   const [fileList, setFileList] = useState([]);
@@ -31,10 +25,8 @@ const UploadCVModal = ({ open, onCancel, positionId, positionName }) => {
   const [processedCount, setProcessedCount] = useState(0);
   const [successCount, setSuccessCount] = useState(0);
   const [failCount, setFailCount] = useState(0);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const sseAbortRef = useRef(null);
   const timerRef = useRef(null);
-  const startTimeRef = useRef(null);
 
   const stopSSE = () => {
     if (sseAbortRef.current) {
@@ -51,9 +43,8 @@ const UploadCVModal = ({ open, onCancel, positionId, positionName }) => {
   };
 
   const startTimer = () => {
-    startTimeRef.current = Date.now();
     timerRef.current = setInterval(() => {
-      setElapsedSeconds(Math.floor((Date.now() - startTimeRef.current) / 1000));
+      setProgress((prev) => (prev < 90 ? prev + Math.max(1, Math.floor((90 - prev) * 0.05)) : prev));
     }, 1000);
   };
 
@@ -65,7 +56,6 @@ const UploadCVModal = ({ open, onCancel, positionId, positionName }) => {
       setProcessedCount(0);
       setSuccessCount(0);
       setFailCount(0);
-      setElapsedSeconds(0);
       stopSSE();
       stopTimer();
     }
@@ -103,7 +93,8 @@ const UploadCVModal = ({ open, onCancel, positionId, positionName }) => {
           setProcessedCount(processed);
           setSuccessCount(status.success ?? 0);
           setFailCount(status.failed ?? 0);
-          setProgress(total > 0 ? Math.round((processed / total) * 100) : 0);
+          const actualProgress = total > 0 ? Math.round((processed / total) * 100) : 0;
+          setProgress((prev) => Math.max(prev, actualProgress));
 
           if (status.status === 'COMPLETED') {
             setProgress(100);
@@ -216,7 +207,7 @@ const UploadCVModal = ({ open, onCancel, positionId, positionName }) => {
           </div>
 
           <Row gutter={[16, 16]}>
-            <Col span={8}>
+            <Col span={12}>
               <Card size="small" style={{ background: '#f5f5f5' }}>
                 <Space>
                   <FileOutlined style={{ fontSize: 20, color: '#1890ff' }} />
@@ -227,20 +218,7 @@ const UploadCVModal = ({ open, onCancel, positionId, positionName }) => {
                 </Space>
               </Card>
             </Col>
-            <Col span={8}>
-              <Card size="small" style={{ background: '#f5f5f5' }}>
-                <Space>
-                  <ClockCircleOutlined style={{ fontSize: 20, color: '#1890ff' }} />
-                  <div>
-                    <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>Elapsed</Text>
-                    <Text strong style={{ fontFamily: 'monospace', fontSize: 16 }}>
-                      {formatElapsed(elapsedSeconds)}
-                    </Text>
-                  </div>
-                </Space>
-              </Card>
-            </Col>
-            <Col span={8}>
+            <Col span={12}>
               <Card size="small" style={{ background: '#fffbe6' }}>
                 <Space>
                   <SyncOutlined spin={isUploading} style={{ fontSize: 20, color: '#faad14' }} />

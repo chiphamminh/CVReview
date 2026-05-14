@@ -14,6 +14,7 @@ import ScheduleInterviewModal from '@/components/modals/ScheduleInterviewModal';
 import SendOfferModal from '@/components/modals/SendOfferModal';
 import { candidateApi } from '@/api/candidate.api';
 import { positionApi } from '@/api/position.api';
+import useCandidateStore from '@/store/candidateStore';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -21,18 +22,33 @@ const CandidatesPage = () => {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const positionIdParam = searchParams.get('positionId') ? parseInt(searchParams.get('positionId')) : null;
-  const sourceTypeParam = searchParams.get('sourceType') || null;
+  const {
+    searchInput, setSearchInput,
+    keyword, setKeyword,
+    stageFilter, setStageFilter,
+    positionFilter, setPositionFilter,
+    typeFilter, setTypeFilter,
+    isScoredFilter, setIsScoredFilter,
+    scoreSort, setScoreSort,
+    page, pageSize, setPagination,
+    clearAllFilters
+  } = useCandidateStore();
 
-  // searchInput: giá trị hiển thị trong ô input (cập nhật ngay)
-  // keyword: giá trị debounced 500ms → dùng để trigger API call
-  const [searchInput, setSearchInput] = useState('');
-  const [keyword, setKeyword] = useState('');
-  const [stageFilter, setStageFilter] = useState(null);
-  const [positionFilter, setPositionFilter] = useState(positionIdParam);
-  const [typeFilter, setTypeFilter] = useState(sourceTypeParam);
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(10);
+  // Parse URL search params once on mount
+  useEffect(() => {
+    let changed = false;
+    if (searchParams.has('positionId')) {
+      setPositionFilter(parseInt(searchParams.get('positionId')));
+      changed = true;
+    }
+    if (searchParams.has('sourceType')) {
+      setTypeFilter(searchParams.get('sourceType'));
+      changed = true;
+    }
+    if (changed) {
+      setSearchParams({});
+    }
+  }, [searchParams, setPositionFilter, setTypeFilter, setSearchParams]);
 
   const [analysisModal, setAnalysisModal] = useState({ open: false, data: null });
   const [updateModal, setUpdateModal] = useState({ open: false, data: null });
@@ -43,18 +59,19 @@ const CandidatesPage = () => {
   useEffect(() => {
     const timer = setTimeout(() => {
       setKeyword(searchInput);
-      setPage(0);
     }, 1000);
     return () => clearTimeout(timer);
-  }, [searchInput]);
+  }, [searchInput, setKeyword]);
 
   const { data: candidatePage, isLoading: isCandLoading, isFetching: isCandFetching, refetch: refetchCandidates } = useQuery({
-    queryKey: ['candidates', { keyword, stageFilter, positionFilter, typeFilter, page, pageSize }],
+    queryKey: ['candidates', { keyword, stageFilter, positionFilter, typeFilter, isScoredFilter, scoreSort, page, pageSize }],
     queryFn: () => candidateApi.filter({
       keyword: keyword || undefined,
       positionId: positionFilter || undefined,
       stage: stageFilter || undefined,
       sourceType: typeFilter || undefined,
+      isScored: isScoredFilter !== null ? isScoredFilter : undefined,
+      scoreSort: scoreSort || undefined,
       page,
       size: pageSize,
     }),
@@ -68,7 +85,7 @@ const CandidatesPage = () => {
   const candidates = candidatePage?.data?.content ?? [];
   const totalElements = candidatePage?.data?.totalElements ?? 0;
   const positions = positionsPage?.data?.content ?? [];
-  const filteredJobTitle = positionFilter ? positions.find(p => p.id === positionFilter)?.title : null;
+  const filteredJobTitle = positionFilter ? positions.find(p => p.id === positionFilter)?.seniority + " " + positions.find(p => p.id === positionFilter)?.title : null;
 
   const updateStageMutation = useMutation({
     mutationFn: ({ cvId, stage }) => candidateApi.updateStage(cvId, stage),
@@ -111,13 +128,8 @@ const CandidatesPage = () => {
     onError: () => message.error('Failed to update candidate info.'),
   });
 
-  const clearAllFilters = () => {
-    setSearchInput('');
-    setKeyword('');
-    setStageFilter(null);
-    setPositionFilter(null);
-    setTypeFilter(null);
-    setPage(0);
+  const handleClearAllFilters = () => {
+    clearAllFilters();
     setSearchParams({});
   };
 
@@ -225,26 +237,30 @@ const CandidatesPage = () => {
       fixed: 'right',
       width: 180,
       render: (_, record) => (
-        <Space size="small">
-          <Tooltip title="View CV">
-            <Button type="text" icon={<EyeOutlined />} onClick={() => window.open(record.driveFileUrl, '_blank')} />
-          </Tooltip>
-          <Tooltip title="AI Analysis">
-            <Button type="text" icon={<FileTextOutlined />} onClick={() => setAnalysisModal({ open: true, data: record })} />
-          </Tooltip>
-          {record.sourceType === 'INTERNAL' && (
-            <Tooltip title="Edit Info">
-              <Button type="text" icon={<EditOutlined />} onClick={() => setUpdateModal({ open: true, data: record })} />
+        <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+          <Space size="small">
+            <Tooltip title="View CV">
+              <Button type="text" icon={<EyeOutlined />} onClick={() => window.open(record.driveFileUrl, '_blank')} />
             </Tooltip>
-          )}
+            <Tooltip title="AI Analysis">
+              <Button type="text" icon={<FileTextOutlined />} onClick={() => setAnalysisModal({ open: true, data: record })} />
+            </Tooltip>
+            {record.sourceType === 'INTERNAL' && (
+              <Tooltip title="Edit Info">
+                <Button type="text" icon={<EditOutlined />} onClick={() => setUpdateModal({ open: true, data: record })} />
+              </Tooltip>
+            )}
+          </Space>
           {getActionMenuItems(record).length > 0 && (
-            <Dropdown menu={{ items: getActionMenuItems(record) }} trigger={['click']}>
-              <Button type="link" size="small">
-                Action <DownOutlined />
-              </Button>
-            </Dropdown>
+            <div style={{ marginLeft: 'auto' }}>
+              <Dropdown menu={{ items: getActionMenuItems(record) }} trigger={['click']} placement="bottomRight">
+                <Button type="link" size="small">
+                  Action <DownOutlined />
+                </Button>
+              </Dropdown>
+            </div>
           )}
-        </Space>
+        </div>
       ),
     },
   ];
@@ -278,15 +294,15 @@ const CandidatesPage = () => {
           placeholder="Filter by Position"
           style={{ width: 250 }}
           value={positionFilter}
-          onChange={val => { setPositionFilter(val ?? null); setPage(0); }}
-          options={positions.map(p => ({ value: p.id, label: p.title }))}
+          onChange={val => setPositionFilter(val ?? null)}
+          options={positions.map(p => ({ value: p.id, label: p.seniority ? `${p.seniority} ${p.title}` : p.title }))}
         />
         <Select
           allowClear
           placeholder="Filter by Source Type"
           style={{ width: 150 }}
           value={typeFilter}
-          onChange={val => { setTypeFilter(val ?? null); setPage(0); }}
+          onChange={val => setTypeFilter(val ?? null)}
           options={[
             { value: 'INTERNAL', label: 'Internal' },
             { value: 'EXTERNAL', label: 'External' },
@@ -297,7 +313,7 @@ const CandidatesPage = () => {
           placeholder="Filter by Stage"
           style={{ width: 200 }}
           value={stageFilter}
-          onChange={val => { setStageFilter(val ?? null); setPage(0); }}
+          onChange={val => setStageFilter(val ?? null)}
           options={[
             { value: 'APPLIED', label: 'Applied' },
             { value: 'INTERVIEW_SCHEDULED', label: 'Interview Scheduled' },
@@ -307,7 +323,29 @@ const CandidatesPage = () => {
             { value: 'REJECTED', label: 'Rejected' },
           ]}
         />
-        <Button icon={<FilterOutlined />} onClick={clearAllFilters} danger type="dashed">
+        <Select
+          allowClear
+          placeholder="Scoring Status"
+          style={{ width: 140 }}
+          value={isScoredFilter}
+          onChange={val => setIsScoredFilter(val ?? null)}
+          options={[
+            { value: true, label: 'Scored' },
+            { value: false, label: 'Not Scored' },
+          ]}
+        />
+        <Select
+          allowClear
+          placeholder="Sort by"
+          style={{ width: 160 }}
+          value={scoreSort}
+          onChange={val => setScoreSort(val ?? null)}
+          options={[
+            { value: 'desc', label: 'Highest Score' },
+            { value: 'asc', label: 'Lowest Score' },
+          ]}
+        />
+        <Button icon={<FilterOutlined />} onClick={handleClearAllFilters} danger type="dashed">
           Clear All
         </Button>
         <Button icon={<ReloadOutlined />} onClick={() => refetchCandidates()} loading={isCandFetching} style={{ marginLeft: 'auto' }}>
@@ -332,8 +370,7 @@ const CandidatesPage = () => {
           total: totalElements,
         }}
         onChange={(pagination) => {
-          setPage(pagination.current - 1);
-          setPageSize(pagination.pageSize);
+          setPagination(pagination.current - 1, pagination.pageSize);
         }}
       />
 

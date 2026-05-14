@@ -117,7 +117,7 @@ public interface CandidateCVRepository extends JpaRepository<CandidateCV, Intege
                      @Param("candidateId") String candidateId,
                      @Param("positionId") int positionId);
 
-       @Query("SELECT c FROM CandidateCV c LEFT JOIN FETCH c.position " +
+       @Query("SELECT c FROM CandidateCV c LEFT JOIN FETCH c.position LEFT JOIN c.analysis a " +
                      "WHERE (:keyword IS NULL OR :keyword = '' OR LOWER(c.name) LIKE LOWER(CONCAT('%', :keyword, '%')) OR LOWER(c.email) LIKE LOWER(CONCAT('%', :keyword, '%'))) "
                      +
                      "AND c.position IS NOT NULL " +
@@ -125,13 +125,21 @@ public interface CandidateCVRepository extends JpaRepository<CandidateCV, Intege
                      "AND (:stage IS NULL OR c.recruitmentStage = :stage) " +
                      "AND (:sourceType IS NULL OR c.sourceType = :sourceType) " +
                      "AND (:cvStatus IS NULL OR c.cvStatus = :cvStatus) " +
-                     "AND c.deletedAt IS NULL")
+                     "AND (:isScored IS NULL OR (:isScored = true AND a IS NOT NULL) OR (:isScored = false AND a IS NULL)) "
+                     +
+                     "AND c.deletedAt IS NULL " +
+                     "ORDER BY " +
+                     "CASE WHEN :scoreSort = 'desc' THEN (a.technicalScore + a.experienceScore) / 2 END DESC, " +
+                     "CASE WHEN :scoreSort = 'asc' THEN (a.technicalScore + a.experienceScore) / 2 END ASC, " +
+                     "c.appliedDate DESC")
        Page<CandidateCV> filterCandidates(
                      @Param("keyword") String keyword,
                      @Param("positionId") Integer positionId,
                      @Param("stage") RecruitmentStage stage,
                      @Param("sourceType") SourceType sourceType,
                      @Param("cvStatus") CVStatus cvStatus,
+                     @Param("isScored") Boolean isScored,
+                     @Param("scoreSort") String scoreSort,
                      Pageable pageable);
 
        /** Tìm các CV đã qua ngày phỏng vấn mà vẫn đang ở stage INTERVIEW_SCHEDULED. */

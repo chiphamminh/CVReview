@@ -198,7 +198,7 @@ public class ChatbotInternalController {
         validateInternalRequest(httpRequest);
         
         // 1. Update recruitment stage in DB (Option B: Java-driven tracking)
-        chatbotInternalService.updateRecruitmentStage(request.getAppCvId(), request.getEmailType());
+        chatbotInternalService.updateRecruitmentStage(request.getAppCvId(), request.getEmailType(), request.getInterviewDate());
         
         // 2. Send email via SMTP
         notificationService.sendInterviewNotification(request);

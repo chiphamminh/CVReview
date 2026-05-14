@@ -220,17 +220,22 @@ public class CandidateCVService {
     }
 
     public ApiResponse<PageResponse<CandidateCVResponse>> filterCandidates(String keyword, Integer positionId,
-            RecruitmentStage stage, SourceType sourceType, CVStatus cvStatus, int page, int size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by("appliedDate").descending());
+            RecruitmentStage stage, SourceType sourceType, CVStatus cvStatus, Boolean isScored, String scoreSort,
+            int page, int size) {
+        // JPQL handles the sorting logic natively, so we pass an unsorted Pageable
+        Pageable pageable = PageRequest.of(page, size);
         Page<CandidateCV> cvPage = candidateCVRepository.filterCandidates(keyword, positionId, stage, sourceType,
-                cvStatus, pageable);
+                cvStatus, isScored, scoreSort, pageable);
 
         Page<CandidateCVResponse> mappedPage = cvPage.map(cv -> {
             CVAnalysis cvAnalysis = cv.getAnalysis();
             return CandidateCVResponse.builder()
                     .cvId(cv.getId())
                     .positionId(cv.getPosition() != null ? cv.getPosition().getId() : 0)
-                    .positionTitle(cv.getPosition() != null ? cv.getPosition().getTitle() : null)
+                    .positionTitle(cv.getPosition() != null
+                            ? PositionUtils.formatPositionTitle(cv.getPosition().getSeniority(),
+                                    cv.getPosition().getTitle())
+                            : null)
                     .email(cv.getEmail())
                     .name(cv.getName())
                     .batchId(cv.getBatchId())

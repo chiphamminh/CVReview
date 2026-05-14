@@ -1,10 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 
-const formatElapsed = (seconds) => {
-  const m = String(Math.floor(seconds / 60)).padStart(2, '0');
-  const s = String(seconds % 60).padStart(2, '0');
-  return `${m}:${s}`;
-};
 import {
   Button, Space, Switch, InputNumber, Typography, Tooltip,
   Tag, Input, Select, Row, Col, Drawer, App, Modal,
@@ -39,7 +34,6 @@ const PositionsPage = () => {
   const { message, notification } = App.useApp();
   const jdSseControllerRef = useRef(null);
   const jdTimerRef = useRef(null);
-  const jdStartTimeRef = useRef(null);
 
   useEffect(() => {
     return () => {
@@ -149,23 +143,24 @@ const PositionsPage = () => {
       const key = `jd-${batchId}`;
 
       if (jdTimerRef.current) clearInterval(jdTimerRef.current);
-      jdStartTimeRef.current = Date.now();
-
-      const getElapsed = () => formatElapsed(Math.floor((Date.now() - jdStartTimeRef.current) / 1000));
 
       notification.open({
         key,
         message: 'Processing Job Description',
-        description: `Parsing and embedding JD for "${positionTitle}"... (00:00)`,
+        description: `Parsing and embedding JD for "${positionTitle}"... (0%)`,
         icon: <SyncOutlined spin style={{ color: '#1677ff' }} />,
         duration: 0,
       });
 
+      let simulatedProgress = 0;
       jdTimerRef.current = setInterval(() => {
+        if (simulatedProgress < 90) {
+          simulatedProgress += Math.max(1, Math.floor((90 - simulatedProgress) * 0.1));
+        }
         notification.open({
           key,
           message: 'Processing Job Description',
-          description: `Parsing and embedding JD for "${positionTitle}"... (${getElapsed()})`,
+          description: `Parsing and embedding JD for "${positionTitle}"... (${simulatedProgress}%)`,
           icon: <SyncOutlined spin style={{ color: '#1677ff' }} />,
           duration: 0,
         });
@@ -178,12 +173,11 @@ const PositionsPage = () => {
       const finish = (success) => {
         clearInterval(jdTimerRef.current);
         jdTimerRef.current = null;
-        const elapsed = getElapsed();
         if (success) {
           notification.open({
             key,
             message: 'JD Ready',
-            description: `"${positionTitle}" processed in ${elapsed} and is ready for candidate matching.`,
+            description: `"${positionTitle}" is processed and ready for candidate matching.`,
             icon: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
             duration: 5,
           });
@@ -192,7 +186,7 @@ const PositionsPage = () => {
           notification.open({
             key,
             message: 'JD Processing Failed',
-            description: `Failed to process JD for "${positionTitle}" after ${elapsed}. Please check and retry.`,
+            description: `Failed to process JD for "${positionTitle}". Please check and retry.`,
             icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
             duration: 6,
           });
@@ -226,7 +220,7 @@ const PositionsPage = () => {
 
       queryClient.invalidateQueries({ queryKey: ['positions'] });
     },
-    [notification, message, queryClient, jdSseControllerRef, jdTimerRef, jdStartTimeRef]
+    [notification, message, queryClient, jdSseControllerRef, jdTimerRef]
   );
 
   const handleToggleActive = useCallback(

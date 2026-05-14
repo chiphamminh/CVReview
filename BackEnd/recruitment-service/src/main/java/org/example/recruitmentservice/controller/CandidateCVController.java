@@ -84,9 +84,11 @@ public class CandidateCVController {
                         @RequestParam(required = false) org.example.recruitmentservice.models.enums.RecruitmentStage stage,
                         @RequestParam(required = false) org.example.recruitmentservice.models.enums.SourceType sourceType,
                         @RequestParam(required = false) CVStatus cvStatus,
+                        @RequestParam(required = false) Boolean isScored,
+                        @RequestParam(required = false) String scoreSort,
                         @RequestParam(defaultValue = "0") int page,
                         @RequestParam(defaultValue = "10") int size) {
-                return candidateCVService.filterCandidates(keyword, positionId, stage, sourceType, cvStatus, page,
+                return candidateCVService.filterCandidates(keyword, positionId, stage, sourceType, cvStatus, isScored, scoreSort, page,
                                 size);
         }
 

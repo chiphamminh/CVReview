@@ -5,14 +5,10 @@ export const positionApi = {
     axiosClient.get('/positions', { params }),
 
   create: (formData) =>
-    axiosClient.post('/positions', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }),
+    axiosClient.post('/positions', formData),
 
   update: (id, formData) =>
-    axiosClient.put(`/positions/${id}`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }),
+    axiosClient.put(`/positions/${id}`, formData),
 
   // score is @RequestParam on the BE, not request body
   updateMinScore: (id, score) =>

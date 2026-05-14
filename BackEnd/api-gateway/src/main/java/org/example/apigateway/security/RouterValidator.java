@@ -22,8 +22,7 @@ public class RouterValidator {
             "/actuator/info",
             "/chatbot/health",
             "/chatbot/health/ready",
-            "/chatbot/health/live",
-            "/positions"
+            "/chatbot/health/live"
     );
 
     /**
@@ -40,6 +39,12 @@ public class RouterValidator {
      */
     public Predicate<ServerHttpRequest> isSecured = request -> {
         String path = request.getURI().getPath();
+        String method = request.getMethod().name();
+
+        if (path.equals("/positions") && method.equalsIgnoreCase("GET")) {
+            return false;
+        }
+
         boolean isExactMatch = openEndpoints.contains(path);
         boolean isPrefixMatch = openPrefixes.stream().anyMatch(path::startsWith);
         return !isExactMatch && !isPrefixMatch;

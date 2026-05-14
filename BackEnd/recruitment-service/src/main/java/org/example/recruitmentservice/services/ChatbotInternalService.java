@@ -158,7 +158,7 @@ public class ChatbotInternalService {
         /**
          * Cập nhật trạng thái RecruitmentStage của Application CV khi gửi email.
          */
-        public void updateRecruitmentStage(Integer appCvId, String emailType) {
+        public void updateRecruitmentStage(Integer appCvId, String emailType, String interviewDate) {
                 if (appCvId == null || emailType == null)
                         return;
 
@@ -167,12 +167,41 @@ public class ChatbotInternalService {
                         switch (emailType.toUpperCase()) {
                                 case "INTERVIEW_INVITE":
                                         newStage = RecruitmentStage.INTERVIEW_SCHEDULED;
+                                        if (interviewDate != null && !interviewDate.trim().isEmpty()) {
+                                                try {
+                                                        String dateStr = interviewDate.trim();
+                                                        // Normalize space to 'T' for ISO format
+                                                        if (dateStr.matches(
+                                                                        "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}(:\\d{2})?(.*)?$")) {
+                                                                dateStr = dateStr.replaceFirst(" ", "T");
+                                                        }
+
+                                                        // If it's just YYYY-MM-DDTHH:MM without seconds, append :00
+                                                        if (dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}$")) {
+                                                                dateStr += ":00";
+                                                        }
+
+                                                        if (dateStr.contains("T") && (dateStr.endsWith("Z")
+                                                                        || dateStr.contains("+")
+                                                                        || dateStr.matches(".*-\\d{2}:\\d{2}$"))) {
+                                                                cv.setInterviewSchedule(java.time.ZonedDateTime
+                                                                                .parse(dateStr)
+                                                                                .toLocalDateTime());
+                                                        } else if (dateStr.contains("T")) {
+                                                                cv.setInterviewSchedule(java.time.LocalDateTime
+                                                                                .parse(dateStr));
+                                                        } else {
+                                                                cv.setInterviewSchedule(java.time.LocalDate
+                                                                                .parse(dateStr).atStartOfDay());
+                                                        }
+                                                } catch (Exception e) {
+                                                        System.err.println("Failed to parse interviewDate: "
+                                                                        + interviewDate + " - " + e.getMessage());
+                                                }
+                                        }
                                         break;
                                 case "OFFER_LETTER":
-                                        newStage = org.example.recruitmentservice.models.enums.RecruitmentStage.OFFER;
-                                        break;
-                                case "REJECTION":
-                                        newStage = org.example.recruitmentservice.models.enums.RecruitmentStage.REJECTED;
+                                        newStage = RecruitmentStage.OFFER;
                                         break;
                         }
                         if (newStage != null) {

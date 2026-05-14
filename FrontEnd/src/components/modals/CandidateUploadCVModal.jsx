@@ -16,12 +16,6 @@ const { Text } = Typography;
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
-const formatElapsed = (seconds) => {
-  const m = String(Math.floor(seconds / 60)).padStart(2, '0');
-  const s = String(seconds % 60).padStart(2, '0');
-  return `${m}:${s}`;
-};
-
 const CandidateUploadCVModal = ({ open, onCancel, onSuccess, isReupload }) => {
   const { message } = App.useApp();
   const [file, setFile] = useState(null);
@@ -29,11 +23,9 @@ const CandidateUploadCVModal = ({ open, onCancel, onSuccess, isReupload }) => {
   const [progress, setProgress] = useState(0);
   const [isDone, setIsDone] = useState(false);
   const [succeeded, setSucceeded] = useState(false);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   const sseAbortRef = useRef(null);
   const timerRef = useRef(null);
-  const startTimeRef = useRef(null);
 
   const stopSSE = () => {
     sseAbortRef.current?.abort();
@@ -48,9 +40,8 @@ const CandidateUploadCVModal = ({ open, onCancel, onSuccess, isReupload }) => {
   };
 
   const startTimer = () => {
-    startTimeRef.current = Date.now();
     timerRef.current = setInterval(() => {
-      setElapsedSeconds(Math.floor((Date.now() - startTimeRef.current) / 1000));
+      setProgress((prev) => (prev < 90 ? prev + Math.max(1, Math.floor((90 - prev) * 0.05)) : prev));
     }, 1000);
   };
 
@@ -61,7 +52,6 @@ const CandidateUploadCVModal = ({ open, onCancel, onSuccess, isReupload }) => {
       setProgress(0);
       setIsDone(false);
       setSucceeded(false);
-      setElapsedSeconds(0);
       stopSSE();
       stopTimer();
     }
@@ -93,7 +83,8 @@ const CandidateUploadCVModal = ({ open, onCancel, onSuccess, isReupload }) => {
         try {
           const status = JSON.parse(event.data);
           const processed = status.processed ?? 0;
-          setProgress(processed > 0 ? 100 : 50);
+          const actualProgress = processed > 0 ? 100 : 50;
+          setProgress((prev) => Math.max(prev, actualProgress));
           if (status.status === 'COMPLETED') {
             setProgress(100);
             setIsDone(true);
@@ -215,20 +206,7 @@ const CandidateUploadCVModal = ({ open, onCancel, onSuccess, isReupload }) => {
           </div>
 
           <Row gutter={[12, 12]}>
-            <Col span={12}>
-              <Card size="small" style={{ background: '#f5f5f5' }}>
-                <Space>
-                  <ClockCircleOutlined style={{ fontSize: 18, color: '#1890ff' }} />
-                  <div>
-                    <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>Elapsed</Text>
-                    <Text strong style={{ fontFamily: 'monospace', fontSize: 16 }}>
-                      {formatElapsed(elapsedSeconds)}
-                    </Text>
-                  </div>
-                </Space>
-              </Card>
-            </Col>
-            <Col span={12}>
+            <Col span={24}>
               <Card size="small" style={{ background: isDone ? (succeeded ? '#f6ffed' : '#fff1f0') : '#fffbe6' }}>
                 <Space>
                   {isDone
