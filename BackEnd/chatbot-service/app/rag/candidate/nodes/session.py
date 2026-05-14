@@ -48,7 +48,10 @@ async def load_session_history_node(state: CandidateChatState) -> CandidateChatS
                     if func_data_str:
                         try:
                             func_data = json.loads(func_data_str)
-                            if isinstance(func_data, dict) and "scored_jobs" in func_data:
+                            if (
+                                isinstance(func_data, dict)
+                                and "scored_jobs" in func_data
+                            ):
                                 state["scored_jobs"] = func_data["scored_jobs"]
                                 print(
                                     f"[Cache Hit] Restored {len(state['scored_jobs'])} "
@@ -89,13 +92,15 @@ async def load_session_history_node(state: CandidateChatState) -> CandidateChatS
 
     ref_map: Dict[int, str] = {}
     for p in positions:
-        parts = [p.get("name", ""), p.get("language", ""), p.get("level", "")]
+        parts = [p.get("seniority", ""), p.get("title", "")]
         label = " ".join(part for part in parts if part)
         ref_map[p["id"]] = label
     state["position_ref_map"] = ref_map
 
     state["is_apply_intent"] = _is_apply_intent(state["query"])
     if state["is_apply_intent"]:
-        print("[Tầng 1] Apply intent detected via hard-rule — will skip scoring if cache hit.")
+        print(
+            "[Tầng 1] Apply intent detected via hard-rule — will skip scoring if cache hit."
+        )
 
     return state

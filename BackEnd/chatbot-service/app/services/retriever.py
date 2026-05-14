@@ -17,7 +17,7 @@ _JD_RANKING_CACHE: Dict[int, List[float]] = {}
 # Qdrant so the Cross-Encoder has a representative pool to rerank.
 # ---------------------------------------------------------------------------
 _RERANK_FETCH_MULTIPLIER = 3
-_RERANK_FETCH_MIN = 30
+_RERANK_FETCH_MIN = 50
 
 
 def get_chunk_text(payload: dict) -> str:
@@ -44,7 +44,7 @@ def get_adaptive_threshold(intent: str, has_specific_filter: bool) -> float:
 
     thresholds = {
         "cv_analysis": 0.40,
-        "jd_search": 0.50,
+        "jd_search": 0.30,
         "jd_analysis": 0.35,
         "general": 0.35,
         "hr_candidate": 0.30,  # position_id filter is highly specific
@@ -61,7 +61,7 @@ def get_adaptive_top_k(intent: str, query_length: int) -> tuple[int, int]:
     """
     base_config = {
         "cv_analysis": (8, 0),
-        "jd_search": (5, 5),
+        "jd_search": (5, 3),
         "jd_analysis": (5, 2),
         "general": (3, 3),
     }
@@ -199,42 +199,111 @@ class CareerCounselorRetriever:
         else:
             cv_threshold = jd_threshold = score_threshold
 
-        print(f"[Retrieval] CV threshold: {cv_threshold:.2f}, JD threshold: {jd_threshold:.2f}")
+        print(
+            f"[Retrieval] CV threshold: {cv_threshold:.2f}, JD threshold: {jd_threshold:.2f}"
+        )
 
         # --- Build filters ---
         cv_must = [FieldCondition(key="is_latest", match=MatchValue(value=True))]
         if cv_id:
             cv_must.append(FieldCondition(key="cvId", match=MatchValue(value=cv_id)))
         elif candidate_id:
-            cv_must.append(FieldCondition(key="candidateId", match=MatchValue(value=candidate_id)))
+            cv_must.append(
+                FieldCondition(key="candidateId", match=MatchValue(value=candidate_id))
+            )
 
         jd_fetch_limit = _rerank_fetch_limit(jd_top_k)
         jd_must = []
         if active_jd_ids is not None:
-            jd_must.append(FieldCondition(key="positionId", match=MatchAny(any=active_jd_ids)))
+            jd_must.append(
+                FieldCondition(key="positionId", match=MatchAny(any=active_jd_ids))
+            )
         jd_filter = Filter(must=jd_must) if jd_must else None
 
-        # --- Run CV and JD Qdrant searches concurrently ---
         loop = asyncio.get_running_loop()
-        cv_results, jd_chunks = await asyncio.gather(
-            loop.run_in_executor(None, lambda: self.qdrant_service.search_similar(
+
+        cv_chunks_for_vector = await loop.run_in_executor(
+            None,
+            lambda: self.qdrant_service.search_similar(
                 collection_name=self.cv_collection,
                 query_vector=query_vector,
-                limit=cv_top_k,
-                score_threshold=cv_threshold,
+                limit=10,
+                score_threshold=0.0,
                 filters=Filter(must=cv_must),
-            )),
-            loop.run_in_executor(None, lambda: self.qdrant_service.search_similar(
-                collection_name=self.jd_collection,
-                query_vector=query_vector,
-                limit=jd_fetch_limit,
-                score_threshold=jd_threshold,
-                filters=jd_filter,
-            )),
+            ),
+        )
+
+        # cv_ranking_vector: built from priority sections (skills, experience, projects,
+        #   education) so the dense vector captures technical domain signal best.
+        # cv_rerank_query:   built from skills metadata ("Java Spring Boot Maven")
+        #   so the cross-encoder discriminates BE vs FE without the O(seq_len²)
+        #   penalty of feeding 200+ words of raw CV text.
+        _PRIORITY_SECTIONS = {
+            "skills", "technical skills", "experience", "work experience",
+            "projects", "education",
+        }
+        if cv_chunks_for_vector:
+            priority_chunks = [
+                c for c in cv_chunks_for_vector
+                if c.get("payload", {}).get("section", "").lower() in _PRIORITY_SECTIONS
+            ]
+            ranking_chunks = priority_chunks if priority_chunks else cv_chunks_for_vector
+
+            cv_text_for_ranking = " ".join(
+                get_chunk_text(c.get("payload", {})) for c in ranking_chunks
+            ).strip()
+            cv_ranking_vector = await self._embed_async(cv_text_for_ranking)
+            print(
+                f"[Retrieval] CV ranking vector: {len(ranking_chunks)} chunks "
+                f"({'priority sections' if priority_chunks else 'all sections'})"
+            )
+
+            cv_skills: list[str] = []
+            for chunk in cv_chunks_for_vector:
+                cv_skills.extend(chunk.get("payload", {}).get("skills", []))
+            seen_skills: set[str] = set()
+            cv_skills_unique = [
+                s for s in cv_skills if not (s in seen_skills or seen_skills.add(s))
+            ]
+            cv_rerank_query = (
+                " ".join(cv_skills_unique[:30])
+                if cv_skills_unique
+                else " ".join(cv_text_for_ranking.split()[:50])
+            )
+            print(
+                f"[Retrieval] CV rerank query ({len(cv_skills_unique)} skills): "
+                f"{cv_rerank_query[:100]}"
+            )
+        else:
+            cv_ranking_vector = query_vector
+            cv_rerank_query = query
+            print("[Retrieval] No CV chunks found — falling back to query vector for JD ranking")
+
+        cv_results, jd_chunks = await asyncio.gather(
+            loop.run_in_executor(
+                None,
+                lambda: self.qdrant_service.search_similar(
+                    collection_name=self.cv_collection,
+                    query_vector=query_vector,
+                    limit=cv_top_k,
+                    score_threshold=cv_threshold,
+                    filters=Filter(must=cv_must),
+                ),
+            ),
+            loop.run_in_executor(
+                None,
+                lambda: self.qdrant_service.search_similar(
+                    collection_name=self.jd_collection,
+                    query_vector=cv_ranking_vector,
+                    limit=jd_fetch_limit,
+                    score_threshold=jd_threshold,
+                    filters=jd_filter,
+                ),
+            ),
         )
 
         jd_results = await reranker.rerank_and_group_async(
-            query=query,
+            query=cv_rerank_query,
             chunks=jd_chunks,
             id_field="positionId",
             top_n=jd_top_k,
@@ -242,8 +311,12 @@ class CareerCounselorRetriever:
 
         cv_quality = self._assess_retrieval_quality(cv_results, "jd_search")
         jd_quality = self._assess_retrieval_quality(jd_results, "jd_search")
-        print(f"[Quality] CV: {cv_quality['quality']} (max={cv_quality['max_score']:.2f})")
-        print(f"[Quality] JD: {jd_quality['quality']} (max={jd_quality['max_score']:.2f})")
+        print(
+            f"[Quality] CV: {cv_quality['quality']} (max={cv_quality['max_score']:.2f})"
+        )
+        print(
+            f"[Quality] JD: {jd_quality['quality']} (max={jd_quality['max_score']:.2f})"
+        )
 
         return {
             "cv_context": cv_results,
@@ -256,7 +329,10 @@ class CareerCounselorRetriever:
                 "jd_score_range": self._get_score_range(jd_results),
                 "cv_quality": cv_quality,
                 "jd_quality": jd_quality,
-                "thresholds_used": {"cv_threshold": cv_threshold, "jd_threshold": jd_threshold},
+                "thresholds_used": {
+                    "cv_threshold": cv_threshold,
+                    "jd_threshold": jd_threshold,
+                },
             },
         }
 
@@ -272,9 +348,17 @@ class CareerCounselorRetriever:
         """Retrieve specific CV chunks and JD chunks for a CV-JD analysis turn (no reranking needed — IDs are explicit)."""
         if not cv_id or not jd_id:
             print(f"[Warning] cv_jd_match called without cv_id or jd_id")
-            return {"cv_context": [], "jd_context": [], "retrieval_stats": {"error": "Missing cv_id or jd_id"}}
+            return {
+                "cv_context": [],
+                "jd_context": [],
+                "retrieval_stats": {"error": "Missing cv_id or jd_id"},
+            }
 
-        threshold = score_threshold if score_threshold is not None else get_adaptive_threshold("jd_analysis", True)
+        threshold = (
+            score_threshold
+            if score_threshold is not None
+            else get_adaptive_threshold("jd_analysis", True)
+        )
         print(f"[Retrieval] Using threshold: {threshold:.2f} (specific CV+JD match)")
 
         cv_results = self.qdrant_service.search_similar(
@@ -282,10 +366,12 @@ class CareerCounselorRetriever:
             query_vector=query_vector,
             limit=cv_top_k,
             score_threshold=threshold,
-            filters=Filter(must=[
-                FieldCondition(key="cvId", match=MatchValue(value=cv_id)),
-                FieldCondition(key="is_latest", match=MatchValue(value=True)),
-            ]),
+            filters=Filter(
+                must=[
+                    FieldCondition(key="cvId", match=MatchValue(value=cv_id)),
+                    FieldCondition(key="is_latest", match=MatchValue(value=True)),
+                ]
+            ),
         )
 
         # JD chunks replaced atomically by positionId — no is_latest needed
@@ -294,11 +380,15 @@ class CareerCounselorRetriever:
             query_vector=query_vector,
             limit=jd_top_k,
             score_threshold=0.0,
-            filters=Filter(must=[FieldCondition(key="positionId", match=MatchValue(value=jd_id))]),
+            filters=Filter(
+                must=[FieldCondition(key="positionId", match=MatchValue(value=jd_id))]
+            ),
         )
 
         cv_quality = self._assess_retrieval_quality(cv_results, "jd_analysis")
-        print(f"[Quality] CV: {cv_quality['quality']} (max={cv_quality['max_score']:.2f})")
+        print(
+            f"[Quality] CV: {cv_quality['quality']} (max={cv_quality['max_score']:.2f})"
+        )
         print(f"[Quality] JD: Retrieved {len(jd_results)} specific JD chunks")
 
         return {
@@ -324,14 +414,24 @@ class CareerCounselorRetriever:
     ) -> Dict[str, Any]:
         """Retrieve CV chunks for a pure CV analysis turn (no JD needed, no reranking — 1 candidate scope)."""
         has_filter = cv_id is not None or candidate_id is not None
-        threshold = score_threshold if score_threshold is not None else get_adaptive_threshold("cv_analysis", has_filter)
+        threshold = (
+            score_threshold
+            if score_threshold is not None
+            else get_adaptive_threshold("cv_analysis", has_filter)
+        )
         print(f"[Retrieval] CV analysis threshold: {threshold:.2f}")
 
-        must_conditions = [FieldCondition(key="is_latest", match=MatchValue(value=True))]
+        must_conditions = [
+            FieldCondition(key="is_latest", match=MatchValue(value=True))
+        ]
         if cv_id:
-            must_conditions.append(FieldCondition(key="cvId", match=MatchValue(value=cv_id)))
+            must_conditions.append(
+                FieldCondition(key="cvId", match=MatchValue(value=cv_id))
+            )
         elif candidate_id:
-            must_conditions.append(FieldCondition(key="candidateId", match=MatchValue(value=candidate_id)))
+            must_conditions.append(
+                FieldCondition(key="candidateId", match=MatchValue(value=candidate_id))
+            )
 
         cv_results = self.qdrant_service.search_similar(
             collection_name=self.cv_collection,
@@ -342,7 +442,9 @@ class CareerCounselorRetriever:
         )
 
         cv_quality = self._assess_retrieval_quality(cv_results, "cv_analysis")
-        print(f"[Quality] CV: {cv_quality['quality']} (max={cv_quality['max_score']:.2f})")
+        print(
+            f"[Quality] CV: {cv_quality['quality']} (max={cv_quality['max_score']:.2f})"
+        )
 
         return {
             "cv_context": cv_results,
@@ -385,7 +487,9 @@ class CareerCounselorRetriever:
                    by the calling node (e.g. 'top 10' → top_n=10).
         """
         fetch_limit = _rerank_fetch_limit(top_n)
-        print(f"[HR Mode] position_id={position_id}, top_n={top_n}, fetch_limit={fetch_limit}")
+        print(
+            f"[HR Mode] position_id={position_id}, top_n={top_n}, fetch_limit={fetch_limit}"
+        )
 
         # Step 1: Resolve JD ranking vector (cached per positionId to avoid re-embedding).
         if position_id in _JD_RANKING_CACHE:
@@ -395,7 +499,13 @@ class CareerCounselorRetriever:
                 query_vector=ranking_vector,
                 limit=5,
                 score_threshold=0.0,
-                filters=Filter(must=[FieldCondition(key="positionId", match=MatchValue(value=position_id))]),
+                filters=Filter(
+                    must=[
+                        FieldCondition(
+                            key="positionId", match=MatchValue(value=position_id)
+                        )
+                    ]
+                ),
             )
             print(f"[HR Mode] JD vector cache hit for position_id={position_id}")
         else:
@@ -404,7 +514,13 @@ class CareerCounselorRetriever:
                 query_vector=await self._embed_async(query),
                 limit=5,
                 score_threshold=0.0,
-                filters=Filter(must=[FieldCondition(key="positionId", match=MatchValue(value=position_id))]),
+                filters=Filter(
+                    must=[
+                        FieldCondition(
+                            key="positionId", match=MatchValue(value=position_id)
+                        )
+                    ]
+                ),
             )
 
             if jd_chunks_for_vector:
@@ -413,10 +529,14 @@ class CareerCounselorRetriever:
                 ).strip()
                 ranking_vector = await self._embed_async(jd_text_for_search)
                 _JD_RANKING_CACHE[position_id] = ranking_vector
-                print(f"[HR Mode] JD vector computed and cached for position_id={position_id}")
+                print(
+                    f"[HR Mode] JD vector computed and cached for position_id={position_id}"
+                )
             else:
                 ranking_vector = await self._embed_async(query)
-                print("[HR Mode] No JD chunks found — falling back to query vector for CV ranking")
+                print(
+                    "[HR Mode] No JD chunks found — falling back to query vector for CV ranking"
+                )
 
         # Step 2: Fetch CV chunks using the JD vector
         cv_chunks = self.qdrant_service.search_similar(
@@ -424,11 +544,15 @@ class CareerCounselorRetriever:
             query_vector=ranking_vector,
             limit=fetch_limit,
             score_threshold=score_threshold,
-            filters=Filter(must=[
-                FieldCondition(key="positionId", match=MatchValue(value=position_id)),
-                FieldCondition(key="sourceType", match=MatchValue(value="HR")),
-                FieldCondition(key="is_latest", match=MatchValue(value=True)),
-            ]),
+            filters=Filter(
+                must=[
+                    FieldCondition(
+                        key="positionId", match=MatchValue(value=position_id)
+                    ),
+                    FieldCondition(key="sourceType", match=MatchValue(value="HR")),
+                    FieldCondition(key="is_latest", match=MatchValue(value=True)),
+                ]
+            ),
         )
 
         # Step 3: Rerank with HR's actual query for conversational relevance
@@ -481,21 +605,33 @@ class CareerCounselorRetriever:
             top_n: Number of unique candidate CVs to return. Parsed dynamically from HR's query.
         """
         query_vector = await self._embed_async(query)
-        threshold = score_threshold if score_threshold is not None else get_adaptive_threshold("hr_candidate", True)
+        threshold = (
+            score_threshold
+            if score_threshold is not None
+            else get_adaptive_threshold("hr_candidate", True)
+        )
         fetch_limit = _rerank_fetch_limit(top_n)
 
-        print(f"[Candidate Mode] position_id={position_id}, top_n={top_n}, fetch_limit={fetch_limit}, threshold={threshold:.2f}")
+        print(
+            f"[Candidate Mode] position_id={position_id}, top_n={top_n}, fetch_limit={fetch_limit}, threshold={threshold:.2f}"
+        )
 
         cv_chunks = self.qdrant_service.search_similar(
             collection_name=self.cv_collection,
             query_vector=query_vector,
             limit=fetch_limit,
             score_threshold=threshold,
-            filters=Filter(must=[
-                FieldCondition(key="applied_position_ids", match=MatchAny(any=[position_id])),
-                FieldCondition(key="sourceType", match=MatchValue(value="CANDIDATE")),
-                FieldCondition(key="is_latest", match=MatchValue(value=True)),
-            ]),
+            filters=Filter(
+                must=[
+                    FieldCondition(
+                        key="applied_position_ids", match=MatchAny(any=[position_id])
+                    ),
+                    FieldCondition(
+                        key="sourceType", match=MatchValue(value="CANDIDATE")
+                    ),
+                    FieldCondition(key="is_latest", match=MatchValue(value=True)),
+                ]
+            ),
         )
 
         cv_results = await reranker.rerank_and_group_async(
@@ -513,9 +649,13 @@ class CareerCounselorRetriever:
             query_vector=query_vector,
             limit=3,
             score_threshold=0.0,
-            filters=Filter(must=[
-                FieldCondition(key="positionId", match=MatchAny(any=jd_ids_to_search))
-            ]),
+            filters=Filter(
+                must=[
+                    FieldCondition(
+                        key="positionId", match=MatchAny(any=jd_ids_to_search)
+                    )
+                ]
+            ),
         )
 
         print(f"[Candidate Mode] JD chunks found: {len(jd_results)}")
@@ -554,7 +694,9 @@ class CareerCounselorRetriever:
         ]
         if seniority_level:
             must_conditions.append(
-                FieldCondition(key="seniorityLevel", match=MatchValue(value=seniority_level))
+                FieldCondition(
+                    key="seniorityLevel", match=MatchValue(value=seniority_level)
+                )
             )
 
         generic_query = " ".join(required_skills)
@@ -586,7 +728,9 @@ class CareerCounselorRetriever:
         scores = [r.get("reranker_score", r.get("score", 0.0)) for r in results]
         return {"min": min(scores), "max": max(scores)}
 
-    def _assess_retrieval_quality(self, results: List[Dict], intent: str) -> Dict[str, Any]:
+    def _assess_retrieval_quality(
+        self, results: List[Dict], intent: str
+    ) -> Dict[str, Any]:
         """Classify retrieval quality as GOOD / ACCEPTABLE / POOR."""
         if not results:
             return {
@@ -603,7 +747,7 @@ class CareerCounselorRetriever:
 
         thresholds = {
             "cv_analysis": {"good": 0.60, "acceptable": 0.40},
-            "jd_search":   {"good": 0.70, "acceptable": 0.50},
+            "jd_search": {"good": 0.70, "acceptable": 0.50},
             "jd_analysis": {"good": 0.60, "acceptable": 0.40},
         }
         t = thresholds.get(intent, {"good": 0.60, "acceptable": 0.40})
@@ -616,7 +760,9 @@ class CareerCounselorRetriever:
             recommendation = "Acceptable quality — results may be less precise"
         else:
             quality = "POOR"
-            recommendation = "Low quality — consider query rewriting or expanding search"
+            recommendation = (
+                "Low quality — consider query rewriting or expanding search"
+            )
 
         return {
             "quality": quality,

@@ -21,8 +21,7 @@ import traceback
 from typing import List, Optional
 
 from app.rag.candidate.state import CandidateChatState
-from app.services.retriever import retriever
-from app.services.recruitment_api import recruitment_api
+from app.services.retriever import retriever, get_chunk_text
 
 
 async def retrieve_context_node(state: CandidateChatState) -> CandidateChatState:
@@ -69,11 +68,12 @@ async def retrieve_context_node(state: CandidateChatState) -> CandidateChatState
 # Sub-strategy implementations
 # ---------------------------------------------------------------------------
 
+
 def _bypass_retrieval(state: CandidateChatState, strategy: str) -> CandidateChatState:
     """Bypass Qdrant entirely. Downstream LLM/tool handles the response directly."""
     print(f"[Candidate Retrieve] strategy={strategy} → Bypass Qdrant")
-    state["cv_context"]      = []
-    state["jd_context"]      = []
+    state["cv_context"] = []
+    state["jd_context"] = []
     state["retrieval_stats"] = {"strategy": strategy, "note": "qdrant_bypassed"}
     return state
 
@@ -86,8 +86,8 @@ async def _retrieve_cv_only(state: CandidateChatState) -> CandidateChatState:
         candidate_id=state.get("candidate_id"),
         cv_id=state.get("cv_id"),
     )
-    state["cv_context"]      = result.get("cv_context", [])
-    state["jd_context"]      = []
+    state["cv_context"] = result.get("cv_context", [])
+    state["jd_context"] = []
     state["retrieval_stats"] = result.get("retrieval_stats", {})
     print(f"[Candidate Retrieve] CV_ANALYSIS → {len(state['cv_context'])} CV chunks")
     return state
@@ -101,10 +101,12 @@ async def _retrieve_jd_only(state: CandidateChatState) -> CandidateChatState:
         jd_id=state.get("jd_id"),
         active_jd_ids=state.get("active_position_ids"),
     )
-    state["cv_context"]      = []
-    state["jd_context"]      = result.get("jd_context", [])
+    state["cv_context"] = []
+    state["jd_context"] = result.get("jd_context", [])
     state["retrieval_stats"] = result.get("retrieval_stats", {})
-    print(f"[Candidate Retrieve] {state.get('pipeline_strategy')} → {len(state['jd_context'])} JD chunks")
+    print(
+        f"[Candidate Retrieve] {state.get('pipeline_strategy')} → {len(state['jd_context'])} JD chunks"
+    )
     return state
 
 
@@ -125,7 +127,7 @@ async def _retrieve_jd_search(state: CandidateChatState) -> CandidateChatState:
     """
     has_scoring_cache = bool(state.get("scored_jobs"))
     # Use expanded query if available, else fall back to original
-    search_query   = state.get("expanded_query") or state["query"]
+    search_query = state.get("expanded_query") or state["query"]
     # Pass skill_variants so keyword search is triggered
     skill_variants = state.get("skill_variants") or []
 
@@ -135,16 +137,16 @@ async def _retrieve_jd_search(state: CandidateChatState) -> CandidateChatState:
         candidate_id=state.get("candidate_id"),
         cv_id=state.get("cv_id"),
         active_jd_ids=state.get("active_position_ids"),
-        skill_variants=skill_variants,   # <-- FIX: was missing before
+        skill_variants=skill_variants,  # <-- FIX: was missing before
     )
 
-    cv_context  = result.get("cv_context", [])
-    chunk_hits  = result.get("jd_context", [])
-    jd_context  = chunk_hits
+    cv_context = result.get("cv_context", [])
+    chunk_hits = result.get("jd_context", [])
+    jd_context = chunk_hits
 
     if chunk_hits:
         # Deduplicate positionIds, preserving Qdrant rank order
-        seen: set         = set()
+        seen: set = set()
         position_ids: List[int] = []
         for hit in chunk_hits:
             pid = hit.get("payload", {}).get("positionId")
@@ -153,32 +155,43 @@ async def _retrieve_jd_search(state: CandidateChatState) -> CandidateChatState:
                 position_ids.append(pid)
 
         if not has_scoring_cache and position_ids:
-            # Mode A: fetch full JD text so scoring_node has complete descriptions
-            print(f"[Candidate Retrieve] Mode A (no cache): fetching full JD for {len(position_ids)} positions")
-            try:
-                full_jd_list = await recruitment_api.get_position_details(position_ids)
-                jd_context = [
-                    {
-                        "score": 1.0,
+            # Consolidate reranked JD chunks per positionId — mirrors HR chatbot:
+            # use Qdrant content directly, no external API call.
+            # The reranker already selected the most CV-relevant sections per JD,
+            # so concatenated chunks give focused scoring signal without API latency.
+            jd_by_position: dict = {}
+            for hit in chunk_hits:
+                pid = hit.get("payload", {}).get("positionId")
+                if pid not in position_ids:
+                    continue
+                chunk_text = get_chunk_text(hit.get("payload", {}))
+                if pid not in jd_by_position:
+                    jd_by_position[pid] = {
+                        "score": hit.get("reranker_score", hit.get("score", 0.0)),
                         "payload": {
-                            "positionId":    jd["id"],
-                            "positionTitle": jd.get("title", ""),
-                            "seniority":     jd.get("seniority", ""),
-                            "jdText":        jd.get("jdText", ""),
+                            "positionId": pid,
+                            "positionTitle": hit.get("payload", {}).get(
+                                "positionTitle", ""
+                            ),
+                            "seniority": hit.get("payload", {}).get("seniority", ""),
+                            "jdText": chunk_text,
                         },
                     }
-                    for jd in full_jd_list
-                    if jd.get("jdText")
-                ]
-                print(f"[Candidate Retrieve] Mode A: {len(jd_context)} full-JD objects")
-            except Exception as e:
-                print(f"[Candidate Retrieve] Mode A: full JD fetch failed, using chunks: {e}")
-                # jd_context already = chunk_hits, keep as-is
+                elif chunk_text:
+                    existing = jd_by_position[pid]["payload"]["jdText"]
+                    if chunk_text not in existing:
+                        jd_by_position[pid]["payload"]["jdText"] += "\n\n" + chunk_text
+
+            jd_context = [
+                jd_by_position[pid] for pid in position_ids if pid in jd_by_position
+            ]
+            print(
+                f"[Candidate Retrieve] Consolidated {len(jd_context)} JDs from {len(chunk_hits)} Qdrant chunks"
+            )
         else:
-            # Mode B: reuse reranked chunks (scoring cache exists or no position IDs found)
             jd_context = chunk_hits
             reason = "scoring cache hit" if has_scoring_cache else "no position IDs"
-            print(f"[Candidate Retrieve] Mode B ({reason}): {len(jd_context)} chunks")
+            print(f"[Candidate Retrieve] Reusing {len(jd_context)} chunks ({reason})")
 
         # active_position_ids == None means the API call failed in session_node;
         # skip the guard entirely to avoid wiping valid JD context.
@@ -187,9 +200,10 @@ async def _retrieve_jd_search(state: CandidateChatState) -> CandidateChatState:
         active_ids_raw: Optional[List[int]] = state.get("active_position_ids")
         if active_ids_raw is not None and len(active_ids_raw) > 0:
             active_ids = set(active_ids_raw)
-            before     = len(jd_context)
+            before = len(jd_context)
             jd_context = [
-                jd for jd in jd_context
+                jd
+                for jd in jd_context
                 if jd.get("payload", {}).get("positionId") in active_ids
             ]
             if len(jd_context) < before:
@@ -204,7 +218,17 @@ async def _retrieve_jd_search(state: CandidateChatState) -> CandidateChatState:
                 "(API failure in session_node) — skipping active-position guard"
             )
 
-    state["cv_context"]      = cv_context
-    state["jd_context"]      = jd_context
+    # Inject positionTitle from ref_map for any item missing it — covers both
+    # Mode A (consolidation) and Mode B (raw cache chunks). Prevents "Unknown Position".
+    ref_map = state.get("position_ref_map") or {}
+    for item in jd_context:
+        payload = item.get("payload", {})
+        if not payload.get("positionTitle"):
+            pid = payload.get("positionId")
+            if pid is not None:
+                payload["positionTitle"] = ref_map.get(pid) or f"Position #{pid}"
+
+    state["cv_context"] = cv_context
+    state["jd_context"] = jd_context
     state["retrieval_stats"] = result.get("retrieval_stats", {})
     return state

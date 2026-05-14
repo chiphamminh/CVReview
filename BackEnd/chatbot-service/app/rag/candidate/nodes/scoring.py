@@ -1,11 +1,11 @@
 """
-Node 2.5 — Multi-dimensional CV-JD scoring.
+Node 2.5 — Multi-dimensional CV-JD scoring (parallel, one LLM call per JD).
 
 Runs only for `jd_search` intent on Turn 1 (no scoring cache).
 
-Model tier (F14):
+Model tier:
   APPLY strategy  → Pro model (guardrail accuracy is critical)
-  All others      → Flash model (browsing; cost/speed over marginal accuracy gain)
+  All others      → Flash model (browsing; cost/speed tradeoff)
 
 MatchStatus thresholds:
   EXCELLENT_MATCH  technicalScore >= 85 AND experienceScore >= 80
@@ -14,6 +14,7 @@ MatchStatus thresholds:
   POOR_FIT         All other cases
 """
 
+import asyncio
 import json
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -33,14 +34,15 @@ def _get_scoring_model(pipeline_strategy: str) -> str:
     return settings.GEMINI_MODEL
 
 
-_SCORING_PROMPT_TEMPLATE = """You are a strict HR scoring system. Score each CV against the provided JDs.
+_SCORING_PROMPT_SINGLE = """You are an experienced HR scoring system. Score this CV against the provided JD.
 
 SCORING SYSTEM:
 
 1. Technical Score (0–100):
-   - Start: 100 pts.
-   - Deduct 8 pts for each missing REQUIRED skill explicitly stated in JD.
-   - Deduct 12 pts if candidate has < 70% of required tech stack overall.
+   - 85-100: Covers all required skills with depth and relevant project evidence.
+   - 65-84:  Covers most required skills; minor gaps in secondary tools.
+   - 45-64:  Covers core skills but missing some important stack items.
+   - 0-44:   Significant gaps in required technical skills.
 
 2. Experience Score (0–100):
    - 85-100: Led architectural decisions, measurable business impact, system design ownership.
@@ -55,51 +57,80 @@ SCORING SYSTEM:
    - POOR_FIT:        All other cases
 
 RULES:
-- STRICT: If a skill is not explicitly stated in CV, assume candidate does NOT have it.
-- NO HALLUCINATION: Do not infer skills from project context alone.
-- HIERARCHICAL SKILL INFERENCE: If candidate is overqualified for a lower-level role, do NOT penalize. Score highly. Set feedback to "Overqualified".
-- learningPath: Provide ONLY for POTENTIAL or POOR_FIT. For POOR_FIT, this is MANDATORY. For EXCELLENT_MATCH or GOOD_MATCH, set to null.
+- Evidence-based: score what is in the CV, but allow reasonable inference from project context.
+- NO HALLUCINATION: Do not invent skills not mentioned anywhere in the CV.
+- HIERARCHICAL SKILL INFERENCE: If candidate has advanced skills that imply basics (e.g., Spring Boot implies Java), do NOT deduct for missing basic keywords. If overqualified for a lower-level role, score highly and note "Overqualified" in aiAssessment.
 
 CV:
 {cv_profile}
 
-JDs to score:
-{jds_block}
+JD to score:
+{jd_block}
 
-Return EXACTLY this JSON array (no markdown, no preamble):
-[
-  {{
-    "positionId": <integer>,
-    "technicalScore": <0-100>,
-    "experienceScore": <0-100>,
-    "overallStatus": "<EXCELLENT_MATCH|GOOD_MATCH|POTENTIAL|POOR_FIT>",
-    "aiAssessment": "<1 concise HR-tone sentence summarising matched and missing skills>",
-    "learningPath": "<90-day roadmap string or null>"
-  }}
-]"""
+Return EXACTLY this JSON object (no markdown, no preamble):
+{{
+  "positionId": <integer>,
+  "technicalScore": <0-100>,
+  "experienceScore": <0-100>,
+  "overallStatus": "<EXCELLENT_MATCH|GOOD_MATCH|POTENTIAL|POOR_FIT>",
+  "aiAssessment": "<1-2 concise HR-tone sentences summarising key matched skills and critical gaps>"
+}}"""
 
 
-def _build_jds_block(jd_context: list) -> str:
-    """Format JD context list into a single text block for the scoring prompt."""
-    block = ""
-    for jd in jd_context:
-        payload  = jd.get("payload", {})
-        jd_id    = payload.get("positionId", "unknown")
-        jd_title = " ".join(filter(None, [
-            payload.get("positionTitle"),
-            payload.get("seniority"),
-        ])) or payload.get("positionTitle", "Unknown Position")
-        jd_text  = payload.get("jdText", "")
-        block += f"\n[JD ID: {jd_id} | Title: {jd_title}]\n{jd_text}\n"
-    return block
+def _build_jd_block(jd: dict) -> str:
+    payload = jd.get("payload", {})
+    jd_id = payload.get("positionId", "unknown")
+    jd_title = " ".join(
+        filter(
+            None,
+            [
+                payload.get("positionTitle"),
+                payload.get("seniority"),
+            ],
+        )
+    ) or payload.get("positionTitle", "Unknown Position")
+    jd_text = payload.get("jdText", "")
+    return f"\n[JD ID: {jd_id} | Title: {jd_title}]\n{jd_text}\n"
+
+
+async def _score_single_jd(
+    cv_profile: str,
+    jd: dict,
+    llm,
+) -> dict | None:
+    """Score one JD against the candidate CV. Returns None on parse failure so
+    asyncio.gather can safely skip it (graceful degradation).
+    Accepts a shared LLM instance — one instance handles concurrent ainvoke calls
+    via its internal async HTTP connection pool (mirrors HR scoring pattern)."""
+    payload = jd.get("payload", {})
+    jd_id = payload.get("positionId", "unknown")
+
+    prompt = _SCORING_PROMPT_SINGLE.format(
+        cv_profile=cv_profile,
+        jd_block=_build_jd_block(jd),
+    )
+    try:
+        response = await llm.ainvoke([HumanMessage(content=prompt)])
+        raw = response.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        return json.loads(raw)
+    except Exception as e:
+        print(f"[Scoring Error] JD {jd_id}: {e}")
+        return None
 
 
 async def scoring_node(state: CandidateChatState) -> CandidateChatState:
-    """Score CV against retrieved JDs using a dedicated Pro model.
+    """Score CV against each retrieved JD in parallel.
 
     Skips if intent is not `jd_search`, context is missing, or a cache hit exists.
+    Failed individual JD calls are skipped (graceful degradation).
     """
-    if state["intent"] != "jd_search" or not state["jd_context"] or not state["cv_context"]:
+    if (
+        state["intent"] != "jd_search"
+        or not state["jd_context"]
+        or not state["cv_context"]
+    ):
         state["scored_jobs"] = state.get("scored_jobs")
         return state
 
@@ -108,30 +139,30 @@ async def scoring_node(state: CandidateChatState) -> CandidateChatState:
         return state
 
     scoring_model = _get_scoring_model(state.get("pipeline_strategy", "JD_SEARCH"))
-    print(f"[Scoring] Running multi-dimensional scoring with model: {scoring_model}...")
-
-    prompt = _SCORING_PROMPT_TEMPLATE.format(
-        cv_profile=build_cv_context(state["cv_context"]),
-        jds_block=_build_jds_block(state["jd_context"]),
+    jd_count = len(state["jd_context"])
+    print(
+        f"[Scoring] Parallel scoring {jd_count} positions with model: {scoring_model}..."
     )
 
     llm = ChatGoogleGenerativeAI(
         model=scoring_model,
         temperature=0.0,
-        max_output_tokens=1500,
+        max_output_tokens=settings.GEMINI_MAX_TOKENS,
         google_api_key=settings.GEMINI_API_KEY,
-        generation_config={"thinking_config": {"thinking_budget": 0}},
+        model_kwargs={"thinking_config": {"thinking_budget": 0}},
     )
 
-    try:
-        response = await llm.ainvoke([HumanMessage(content=prompt)])
-        raw = response.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-        state["scored_jobs"] = json.loads(raw)
-        print(f"[Scoring] Scored {len(state['scored_jobs'])} positions (multi-dimensional).")
-    except Exception as e:
-        print(f"[Scoring Error] JSON parse failed: {e} — proceeding without scores.")
-        state["scored_jobs"] = None
+    cv_profile = build_cv_context(state["cv_context"])
+
+    results = await asyncio.gather(
+        *[
+            _score_single_jd(cv_profile, jd, llm)
+            for jd in state["jd_context"]
+        ],
+    )
+
+    scored_jobs = [r for r in results if r is not None]
+    state["scored_jobs"] = scored_jobs if scored_jobs else None
+    print(f"[Scoring] Scored {len(scored_jobs)}/{jd_count} positions (parallel).")
 
     return state

@@ -72,20 +72,6 @@ def _timed(name: str, fn):
         return _sync
 
 
-def _extract_text_token(chunk) -> str:
-    """Return plain text from an AIMessageChunk, skipping tool-call blocks."""
-    content = chunk.content
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "".join(
-            block.get("text", "")
-            for block in content
-            if isinstance(block, dict) and block.get("type") == "text"
-        )
-    return ""
-
-
 # Status messages emitted as SSE events when each heavy node starts.
 # Node-based: messages appear only for stages the current intent actually visits.
 _NODE_STATUS: dict[str, str] = {
@@ -244,17 +230,14 @@ class CandidateChatbot:
                     _sent_statuses.add(node)
                     yield f"data: {json.dumps({'status': status}, ensure_ascii=False)}\n\n"
 
-            elif event_type == "on_chat_model_stream" and node == "llm_reasoning":
-                token = _extract_text_token(event["data"]["chunk"])
-                if token:
-                    yield f"data: {json.dumps({'token': token})}\n\n"
-
-            elif event_type == "on_chain_end" and event.get("name") == "LangGraph":
+            elif event_type == "on_chain_end" and node == "format_response":
                 output         = event["data"].get("output") or {}
                 final_answer   = output.get("final_answer", "")
                 final_metadata = output.get("metadata", {})
-
-        yield f"data: {json.dumps({'done': True, 'metadata': final_metadata, 'fallback_answer': final_answer})}\n\n"
+        # Strip scored_jobs from the SSE done payload — it's large and the FE only
+        # needs fallback_answer to render. scored_jobs is already persisted to DB.
+        sse_metadata = {k: v for k, v in final_metadata.items() if k != "scored_jobs"}
+        yield f"data: {json.dumps({'done': True, 'metadata': sse_metadata, 'fallback_answer': final_answer}, ensure_ascii=False)}\n\n"
 
 
 candidate_chatbot = CandidateChatbot()

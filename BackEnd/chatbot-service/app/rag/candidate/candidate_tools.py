@@ -24,7 +24,6 @@ async def finalize_application(
     technical_score: int,
     experience_score: int,
     ai_assessment: str,
-    learning_path: Optional[str],
     candidate_id: str,
     session_id: str,
 ) -> str:
@@ -34,10 +33,9 @@ async def finalize_application(
     Args:
         position_id:      ID của vị trí ứng tuyển
         overall_status:   MatchStatus do AI sinh ra (chỉ để hiển thị)
-        technical_score:  Điểm kỹ thuật (0-100)
-        experience_score: Điểm kinh nghiệm (0-100)
+        technical_score:  Điểm kỹ thuật (0-100) — tự động inject từ scored_jobs
+        experience_score: Điểm kinh nghiệm (0-100) — tự động inject từ scored_jobs
         ai_assessment:    Nhận xét AI tổng hợp
-        learning_path:    Lộ trình học tập (None nếu không cần)
         candidate_id:     UUID của ứng viên (tự động inject từ session)
         session_id:       ID phiên hội thoại (tự động inject từ session)
     """
@@ -49,7 +47,7 @@ async def finalize_application(
             experience_score=experience_score,
             overall_status=overall_status,
             ai_assessment=ai_assessment,
-            learning_path=learning_path,
+            learning_path=None,
             session_id=session_id,
         )
         return f"Nộp đơn thành công. Application CV ID: {res.get('applicationCvId')}"

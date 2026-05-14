@@ -169,7 +169,7 @@ CANDIDATE QUESTION:
 
 ## Top Matching Positions
 
-### [Rank]. [Position Title] — Overall: [overallStatus] | Technical: [technicalScore]/100 | Experience: [experienceScore]/100
+### [Rank]. [Position Title] — Overall: [overallStatus] | Match: [matchPercent]%
 
 **HR Assessment:** [2-3 sentences — frank evaluation of this candidate for this specific role. Mention the single strongest alignment and the most critical gap. No generic filler.]
 
@@ -178,20 +178,16 @@ CANDIDATE QUESTION:
 - POTENTIAL → ⚡ **Prepare First** — You have potential but need to address [key gap].
 - POOR_FIT → ✗ **Not Suitable** — [Direct explanation of the main blocker].
 
-**If POTENTIAL or POOR_FIT — Learning Path:**
-[Concrete 30-60 day roadmap to close the most critical skill gap. Real resources, realistic timeframes.]
-
 ---
-[Repeat for each position, ranked by (technicalScore + experienceScore) descending]
+[Repeat for each position, ranked by Match% descending]
 
 ## Overall Recommendation
 [1-2 sentences summarizing which position(s) to prioritize and the immediate next step.]
 
 ---
 Rules:
-- Scores come from pre-screened fit data — do not invent new scores
+- Match% comes from pre-screened fit data — do not invent percentages
 - HR Assessment per position: max 3 sentences, be substantive not generic
-- For POOR_FIT: ALWAYS display skillMiss and learningPath — never skip this
 - If candidate is labeled "Overqualified", strongly suggest applying for higher-level roles
 - If no positions available: state clearly and advise on next steps
 - Language: Same as the user's question (Vietnamese by default)
@@ -331,6 +327,7 @@ Response tone: Direct, experienced, actionable. Not generic. Language: Same as t
 # CONTEXT BUILDERS
 # ============================================================
 
+
 def build_cv_context(cv_chunks: list) -> str:
     """Assemble CV context string from Qdrant result chunks."""
     if not cv_chunks:
@@ -340,8 +337,8 @@ def build_cv_context(cv_chunks: list) -> str:
     for i, chunk in enumerate(cv_chunks, 1):
         payload = chunk.get("payload", {})
         section = payload.get("section", "Unknown")
-        text    = payload.get("chunkText", "").strip()
-        score   = chunk.get("reranker_score", chunk.get("score", 0))
+        text = payload.get("chunkText", "").strip()
+        score = chunk.get("reranker_score", chunk.get("score", 0))
 
         if not text:
             continue
@@ -350,7 +347,9 @@ def build_cv_context(cv_chunks: list) -> str:
             f"[CV Section {i} — {section} | Relevance: {score:.2f}]\n{text}\n"
         )
 
-    return "\n".join(context_parts) if context_parts else "No relevant CV sections found."
+    return (
+        "\n".join(context_parts) if context_parts else "No relevant CV sections found."
+    )
 
 
 def build_jd_context(jd_docs: list) -> str:
@@ -367,11 +366,15 @@ def build_jd_context(jd_docs: list) -> str:
 
     context_parts = []
     for i, doc in enumerate(jd_docs, 1):
-        payload  = doc.get("payload", {})
-        position = payload.get("positionTitle") or payload.get("positionName") or payload.get("position", "Unknown Position")
-        jd_id    = payload.get("positionId") or payload.get("jdId", "N/A")
-        jd_text  = (payload.get("jdText") or payload.get("chunkText", "")).strip()
-        score    = doc.get("reranker_score", doc.get("score", 0))
+        payload = doc.get("payload", {})
+        position = (
+            payload.get("positionTitle")
+            or payload.get("positionName")
+            or payload.get("position", "Unknown Position")
+        )
+        jd_id = payload.get("positionId") or payload.get("jdId", "N/A")
+        jd_text = (payload.get("jdText") or payload.get("chunkText", "")).strip()
+        score = doc.get("reranker_score", doc.get("score", 0))
 
         if not jd_text:
             continue
@@ -380,7 +383,11 @@ def build_jd_context(jd_docs: list) -> str:
             f"[Position {i} | ID: {jd_id} | Title: {position} | Relevance: {score:.2f}]\n{jd_text}\n"
         )
 
-    return "\n".join(context_parts) if context_parts else "No relevant job positions found."
+    return (
+        "\n".join(context_parts)
+        if context_parts
+        else "No relevant job positions found."
+    )
 
 
 def build_combined_context(cv_chunks: list, jd_docs: list) -> str:
@@ -392,19 +399,26 @@ def build_combined_context(cv_chunks: list, jd_docs: list) -> str:
 
 
 def build_scored_jobs_context(scored_jobs: list) -> str:
-    """Serialize pre-screened multi-dimensional fit scores into a readable block for the LLM."""
+    """Serialize pre-screened fit scores into a readable block for the LLM.
+
+    Exposes match% (avg of technical + experience) instead of raw component scores
+    so the LLM presents a single actionable number to candidates.
+    Internal technicalScore/experienceScore are preserved in scored_jobs for guardrail use.
+    """
     if not scored_jobs:
         return "No pre-screened fit data available."
 
     lines = []
     for job in scored_jobs:
+        tech = job.get("technicalScore") or 0
+        exp = job.get("experienceScore") or 0
+        match_pct = round((tech + exp) / 2)
         lines.append(
             f"Position ID {job.get('positionId')} — "
-            f"Technical: {job.get('technicalScore', 'N/A')}/100 | "
-            f"Experience: {job.get('experienceScore', 'N/A')}/100 | "
+            f"Match: {match_pct}% | "
+            f"technicalScore: {tech} | experienceScore: {exp} | "
             f"Status: {job.get('overallStatus', 'N/A')}\n"
-            f"  AI Assessment: {job.get('aiAssessment', 'N/A')}\n"
-            f"  Learning Path: {job.get('learningPath', 'N/A')}"
+            f"  AI Assessment: {job.get('aiAssessment', 'N/A')}"
         )
     return "\n\n".join(lines)
 
@@ -415,9 +429,18 @@ def build_scored_jobs_context(scored_jobs: list) -> str:
 
 import re as _re
 
-_BENEFITS_RE  = _re.compile(r"\b(salary|compensation|wage|pay|stipend|benefit|insurance|bonus|perk|allowance|lương|luong|thưởng|thuong|phúc lợi|phuc loi|chế độ|che do|bảo hiểm|bao hiem|remote|hybrid)\b", _re.I)
-_PROCESS_RE   = _re.compile(r"\b(interview|process|round|stage|step|test|coding challenge|timeline|how long|response time|phỏng vấn|phong van|quy trình|quy trinh|vòng|thi|bài test|bao lâu|khi nào)\b", _re.I)
-_IMPROVE_RE   = _re.compile(r"\b(improve|learn|study|roadmap|plan|prepare|how to get|what to add|skill gap|missing|cải thiện|cai thien|học|hoc|chuẩn bị|chuan bi|lộ trình|lo trinh|thiếu)\b", _re.I)
+_BENEFITS_RE = _re.compile(
+    r"\b(salary|compensation|wage|pay|stipend|benefit|insurance|bonus|perk|allowance|lương|luong|thưởng|thuong|phúc lợi|phuc loi|chế độ|che do|bảo hiểm|bao hiem|remote|hybrid)\b",
+    _re.I,
+)
+_PROCESS_RE = _re.compile(
+    r"\b(interview|process|round|stage|step|test|coding challenge|timeline|how long|response time|phỏng vấn|phong van|quy trình|quy trinh|vòng|thi|bài test|bao lâu|khi nào)\b",
+    _re.I,
+)
+_IMPROVE_RE = _re.compile(
+    r"\b(improve|learn|study|roadmap|plan|prepare|how to get|what to add|skill gap|missing|cải thiện|cai thien|học|hoc|chuẩn bị|chuan bi|lộ trình|lo trinh|thiếu)\b",
+    _re.I,
+)
 
 
 def _detect_jd_sub_intent(query: str) -> str:
@@ -438,6 +461,7 @@ def _detect_jd_sub_intent(query: str) -> str:
 # PROMPT SELECTOR
 # ============================================================
 
+
 def get_prompt_for_intent(
     intent: str,
     query: str,
@@ -451,12 +475,12 @@ def get_prompt_for_intent(
     Within jd_analysis, routes to a focused sub-template (benefits / process / improve)
     to improve answer precision without extra LLM calls.
     """
-    cv_context  = cv_context  or []
-    jd_context  = jd_context  or []
+    cv_context = cv_context or []
+    jd_context = jd_context or []
     scored_jobs = scored_jobs or []
 
-    cv_ctx  = build_cv_context(cv_context)
-    jd_ctx  = build_jd_context(jd_context)
+    cv_ctx = build_cv_context(cv_context)
+    jd_ctx = build_jd_context(jd_context)
 
     history_text = ""
     if conversation_history:
@@ -477,13 +501,16 @@ def get_prompt_for_intent(
         user_prompt += history_text
 
     elif intent == "jd_search":
-        scored_ctx  = build_scored_jobs_context(scored_jobs)
-        user_prompt = JD_SEARCH_PROMPT.format(
-            cv_context=cv_ctx,
-            jd_context=jd_ctx,
-            scored_jobs=scored_ctx,
-            query=query,
-        ) + history_text
+        scored_ctx = build_scored_jobs_context(scored_jobs)
+        user_prompt = (
+            JD_SEARCH_PROMPT.format(
+                cv_context=cv_ctx,
+                jd_context=jd_ctx,
+                scored_jobs=scored_ctx,
+                query=query,
+            )
+            + history_text
+        )
 
     elif intent == "jd_analysis":
         sub_intent = _detect_jd_sub_intent(query)
@@ -502,7 +529,11 @@ def get_prompt_for_intent(
         user_prompt += history_text
 
     else:  # general
-        combined    = build_combined_context(cv_context, jd_context) if (cv_context or jd_context) else "No CV or JD context available."
+        combined = (
+            build_combined_context(cv_context, jd_context)
+            if (cv_context or jd_context)
+            else "No CV or JD context available."
+        )
         user_prompt = GENERAL_PROMPT.format(context=combined, query=query)
 
     return SYSTEM_PROMPT, user_prompt

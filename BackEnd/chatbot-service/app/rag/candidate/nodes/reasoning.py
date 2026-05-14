@@ -38,16 +38,24 @@ def _get_temperature(intent: str) -> float:
     return temperatures.get(intent, 0.3)
 
 
+def _get_max_output_tokens(intent: str) -> int:
+    """JD_SEARCH generates multi-position analysis with learning paths — needs more headroom."""
+    if intent == "jd_search":
+        return 4096
+    return settings.GEMINI_MAX_TOKENS
+
+
 async def llm_reasoning_node(state: CandidateChatState) -> CandidateChatState:
     """Single LLM call that generates the full candidate-facing response."""
-    intent      = state["intent"]
-    temperature = _get_temperature(intent)
-    tool_map    = {t.name: t for t in CANDIDATE_TOOLS}
+    intent          = state["intent"]
+    temperature     = _get_temperature(intent)
+    max_out_tokens  = _get_max_output_tokens(intent)
+    tool_map        = {t.name: t for t in CANDIDATE_TOOLS}
 
     llm = ChatGoogleGenerativeAI(
         model=settings.GEMINI_MODEL,
         temperature=temperature,
-        max_output_tokens=settings.GEMINI_MAX_TOKENS,
+        max_output_tokens=max_out_tokens,
         google_api_key=settings.GEMINI_API_KEY,
         model_kwargs={"thinking_config": {"thinking_budget": 0}},
     ).bind_tools(CANDIDATE_TOOLS)
@@ -57,10 +65,9 @@ async def llm_reasoning_node(state: CandidateChatState) -> CandidateChatState:
         HumanMessage(content=state["user_prompt"]),
     ]
 
-    # Use astream so astream_events can emit on_chat_model_stream token events.
-    response = None
-    async for chunk in llm.astream(messages):
-        response = chunk if response is None else response + chunk
+    # ainvoke (not astream) — astream inside astream_events causes LangGraph
+    # callback interference that truncates the generator after a few chunks.
+    response = await llm.ainvoke(messages)
 
     state["llm_response"]   = _extract_llm_text(response.content) if response else ""
     state["function_calls"] = None
@@ -82,6 +89,8 @@ async def llm_reasoning_node(state: CandidateChatState) -> CandidateChatState:
             state, finalized = await _handle_finalize_application(
                 state, call, tool_args, tool_map, messages
             )
+            if finalized == "BLOCKED":
+                return state  # llm_response already set, skip second LLM
             if finalized:
                 finalized_positions.append(finalized)
 
@@ -102,8 +111,8 @@ async def llm_reasoning_node(state: CandidateChatState) -> CandidateChatState:
     if finalized_positions:
         pos_list_str = ", ".join(f"**{name}**" for name in finalized_positions)
         state["llm_response"] = (
-            f"I have successfully submitted your application for the following position(s): {pos_list_str}. "
-            "Please wait for our HR response!"
+            f"Bạn đã nộp đơn ứng tuyển thành công cho vị trí: {pos_list_str}. "
+            "Hãy chờ phản hồi từ phía HR nhé!"
         )
         return state
 
@@ -111,13 +120,11 @@ async def llm_reasoning_node(state: CandidateChatState) -> CandidateChatState:
         llm_no_tools = ChatGoogleGenerativeAI(
             model=settings.GEMINI_MODEL,
             temperature=temperature,
-            max_output_tokens=settings.GEMINI_MAX_TOKENS,
+            max_output_tokens=max_out_tokens,
             google_api_key=settings.GEMINI_API_KEY,
             model_kwargs={"thinking_config": {"thinking_budget": 0}},
         )
-        second_response = None
-        async for chunk in llm_no_tools.astream(messages):
-            second_response = chunk if second_response is None else second_response + chunk
+        second_response = await llm_no_tools.ainvoke(messages)
         state["llm_response"] = _extract_llm_text(second_response.content) if second_response else ""
 
     return state
@@ -153,23 +160,31 @@ async def _handle_finalize_application(
     applied_position_name = ref_map.get(pos_id, f"position #{pos_id}")
 
     # Guardrail: block applications below minimumFitScore threshold.
+    # Always inject authoritative scores from state — never rely on LLM-provided values.
     matched_job = next(
         (j for j in (state.get("scored_jobs") or []) if j.get("positionId") == pos_id),
         None,
     )
     if matched_job:
+        tool_args = {
+            **tool_args,
+            "technical_score":  matched_job.get("technicalScore", 0),
+            "experience_score": matched_job.get("experienceScore", 0),
+            "overall_status":   matched_job.get("overallStatus", tool_args.get("overall_status", "")),
+            "ai_assessment":    matched_job.get("aiAssessment", tool_args.get("ai_assessment", "")),
+        }
         avg_score = (matched_job.get("technicalScore", 0) + matched_job.get("experienceScore", 0)) / 2
         min_score = position_score_cache.get(pos_id, 70.0)
         if avg_score < min_score:
-            learning_path = matched_job.get("learningPath", "")
-            block_msg = (
-                f"Không thể nộp đơn vào vị trí **{applied_position_name}** "
-                f"(Điểm trung bình: **{avg_score:.1f}** < ngưỡng tối thiểu: **{min_score:.1f}**).\n\n"
-                f"**Lộ trình cải thiện:** {learning_path or 'Chưa có gợi ý cụ thể.'}"
+            state["llm_response"] = (
+                f"Rất tiếc, bạn chưa đủ điều kiện để ứng tuyển vào vị trí **{applied_position_name}**.\n\n"
+                f"Điểm phù hợp của bạn là **{avg_score:.0f}/100**, thấp hơn ngưỡng tối thiểu yêu cầu "
+                f"(**{min_score:.0f}/100**) của vị trí này.\n\n"
+                f"Hãy tiếp tục phát triển kỹ năng và thử lại sau khi đã cải thiện các điểm còn thiếu."
             )
-            messages.append(ToolMessage(content=block_msg, tool_call_id=call["id"]))
-            state["function_calls"].append({"name": "finalize_application", "arguments": tool_args, "result": block_msg})
-            return state, None
+            messages.append(ToolMessage(content="blocked: score below minimum", tool_call_id=call["id"]))
+            state["function_calls"].append({"name": "finalize_application", "arguments": tool_args, "result": "blocked"})
+            return state, "BLOCKED"
 
     try:
         # ISSUE-10: Normalize list→str for skill fields to prevent

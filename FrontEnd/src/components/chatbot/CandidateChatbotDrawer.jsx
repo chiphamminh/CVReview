@@ -32,9 +32,7 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [streamingContent, setStreamingContent] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
-  const streamBufferRef = useRef('');
 
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -229,8 +227,6 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
 
     setMessages(prev => [...prev, { role: 'user', content }]);
     setInputValue('');
-    streamBufferRef.current = '';
-    setStreamingContent('');
     setStatusMessage('');
     setIsLoading(true);
 
@@ -239,23 +235,14 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
         sessionId, content, user.id, cvId,
         {
           onStatus: (status) => setStatusMessage(status),
-          onToken: (token) => {
-            streamBufferRef.current += token;
-            setStreamingContent(streamBufferRef.current);
-          },
           onDone: ({ fallback_answer }) => {
-            const finalContent = fallback_answer || streamBufferRef.current || '';
-            setMessages(prev => [...prev, { role: 'assistant', content: finalContent }]);
-            streamBufferRef.current = '';
-            setStreamingContent('');
+            setMessages(prev => [...prev, { role: 'assistant', content: fallback_answer || '' }]);
             setStatusMessage('');
           },
         }
       );
     } catch {
       setMessages(prev => prev.slice(0, -1));
-      streamBufferRef.current = '';
-      setStreamingContent('');
       setStatusMessage('');
     } finally {
       setIsLoading(false);
@@ -364,13 +351,10 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
                 backgroundColor: '#f5f5f5',
                 border: '1px solid #d9d9d9',
               }}>
-                {streamingContent
-                  ? <ChatMarkdown>{streamingContent}</ChatMarkdown>
-                  : <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Spin size="small" />
-                      <span style={{ color: '#8c8c8c' }}>{statusMessage || 'AI is thinking...'}</span>
-                    </div>
-                }
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Spin size="small" />
+                  <span style={{ color: '#8c8c8c' }}>{statusMessage || 'AI is thinking...'}</span>
+                </div>
               </div>
             </div>
           )}
