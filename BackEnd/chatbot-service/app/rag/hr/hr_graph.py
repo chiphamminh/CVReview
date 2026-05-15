@@ -273,9 +273,15 @@ class HRChatbot:
             "scored_cv_ids":              [],
         }
 
-        final_answer    = ""
+        final_answer      = ""
         final_metadata: Dict[str, Any] = {}
         _sent_statuses: set[str] = set()
+        # Only stream tokens for intents that go through hr_scoring_node.
+        # For all other intents the done event's fallback_answer is the canonical
+        # response — emitting tokens causes a race where the frontend receives
+        # `done` before rendering all tokens, producing truncated output.
+        _STREAMING_STRATEGIES = {"RANK", "FIND_MORE"}
+        _pipeline_strategy    = ""
 
         async for event in self.graph.astream_events(
             initial_state, version="v2", config={"recursion_limit": 50}
@@ -283,23 +289,44 @@ class HRChatbot:
             event_type = event["event"]
             node       = event.get("metadata", {}).get("langgraph_node", "")
 
-            if event_type == "on_chain_start" and node not in _sent_statuses:
-                status = _NODE_STATUS.get(node)
-                if status:
-                    _sent_statuses.add(node)
-                    yield f"data: {json.dumps({'status': status}, ensure_ascii=False)}\n\n"
+            if event_type == "on_chain_start":
+                # Capture strategy from llm_hr_reasoning input — by this point
+                # route_hr_intent has already written pipeline_strategy to state.
+                if node == "llm_hr_reasoning":
+                    _inp = event["data"].get("input")
+                    if isinstance(_inp, dict):
+                        _pipeline_strategy = _inp.get("pipeline_strategy", "")
+                # Status message
+                if node not in _sent_statuses:
+                    status = _NODE_STATUS.get(node)
+                    if status:
+                        _sent_statuses.add(node)
+                        yield f"data: {json.dumps({'status': status}, ensure_ascii=False)}\n\n"
 
             elif event_type == "on_chat_model_stream" and node == "llm_hr_reasoning":
-                token = _extract_text_token(event["data"]["chunk"])
-                if token:
-                    yield f"data: {json.dumps({'token': token})}\n\n"
+                if _pipeline_strategy in _STREAMING_STRATEGIES:
+                    token = _extract_text_token(event["data"]["chunk"])
+                    if token:
+                        yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
+
+            elif event_type == "on_chain_end" and node == "format_hr_response":
+                # Primary capture: format_hr_response is the last node and always
+                # sets final_answer = llm_response. More reliable than the graph-end
+                # event whose name can vary across LangGraph versions.
+                _out = event["data"].get("output")
+                if isinstance(_out, dict):
+                    final_answer   = _out.get("final_answer", "")
+                    final_metadata = _out.get("metadata", {})
 
             elif event_type == "on_chain_end" and event.get("name") == "LangGraph":
-                output         = event["data"].get("output") or {}
-                final_answer   = output.get("final_answer", "")
-                final_metadata = output.get("metadata", {})
+                # Fallback: also try graph-end event in case format_hr_response
+                # output was not a dict (LangGraph version-specific behaviour).
+                _out = event["data"].get("output") or {}
+                if isinstance(_out, dict) and not final_answer:
+                    final_answer   = _out.get("final_answer", "")
+                    final_metadata = _out.get("metadata", {})
 
-        yield f"data: {json.dumps({'done': True, 'metadata': final_metadata, 'fallback_answer': final_answer})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'metadata': final_metadata, 'fallback_answer': final_answer}, ensure_ascii=False)}\n\n"
 
 
 hr_chatbot = HRChatbot()

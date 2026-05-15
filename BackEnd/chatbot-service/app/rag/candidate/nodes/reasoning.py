@@ -57,7 +57,7 @@ async def llm_reasoning_node(state: CandidateChatState) -> CandidateChatState:
         temperature=temperature,
         max_output_tokens=max_out_tokens,
         google_api_key=settings.GEMINI_API_KEY,
-        model_kwargs={"thinking_config": {"thinking_budget": 0}},
+        thinking_budget=0,
     ).bind_tools(CANDIDATE_TOOLS)
 
     messages = [
@@ -122,7 +122,7 @@ async def llm_reasoning_node(state: CandidateChatState) -> CandidateChatState:
             temperature=temperature,
             max_output_tokens=max_out_tokens,
             google_api_key=settings.GEMINI_API_KEY,
-            model_kwargs={"thinking_config": {"thinking_budget": 0}},
+            thinking_budget=0,
         )
         second_response = await llm_no_tools.ainvoke(messages)
         state["llm_response"] = _extract_llm_text(second_response.content) if second_response else ""

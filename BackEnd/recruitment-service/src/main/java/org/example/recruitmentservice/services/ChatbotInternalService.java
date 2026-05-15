@@ -17,6 +17,7 @@ import org.example.recruitmentservice.models.enums.SourceType;
 import org.example.recruitmentservice.repository.CVAnalysisRepository;
 import org.example.recruitmentservice.repository.CandidateCVRepository;
 import org.example.recruitmentservice.repository.PositionRepository;
+import org.example.recruitmentservice.utils.PositionUtils;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -227,7 +228,8 @@ public class ChatbotInternalService {
                 analysis.setCandidateCV(cv);
                 analysis.setPositionId(request.getPositionId());
                 if (cv.getPosition() != null) {
-                        analysis.setPositionName(cv.getPosition().getTitle());
+                        analysis.setPositionName(PositionUtils.formatPositionTitle(cv.getPosition().getSeniority(),
+                                        cv.getPosition().getTitle()));
                 }
 
                 analysis.setTechnicalScore(request.getTechnicalScore());

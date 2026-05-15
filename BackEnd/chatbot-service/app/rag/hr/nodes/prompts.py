@@ -27,13 +27,11 @@ _STRATEGY_HINTS: dict[str, str] = {
     "AGGREGATE": "\n\nINSTRUCTION: Answer with exact numbers from the statistics data provided. Do NOT estimate or fabricate counts.",
     "FIND_MORE": (
         "\n\nINSTRUCTION: These are NEW candidates not previously shown. "
-        "Base your assessment STRICTLY on the CV chunks provided in 'CV Data Retrieved' above. "
-        "A candidate does NOT need an AI score to be evaluated — read their CV text directly. "
-        "Do NOT say you lack information if CV chunks are present for a candidate. "
-        "Treat NULL/missing score as 'not yet scored' and assess from CV content alone."
+        "Do NOT write a detailed analysis — a structured scoring table will be generated automatically. "
+        "Respond with ONE brief sentence acknowledging new candidates found, then stop."
     ),
     "FILTER": "\n\nINSTRUCTION: Filter and rank candidates according to the specified criteria. Only list candidates that match.",
-    "RANK": "",
+    "RANK": "\n\nINSTRUCTION: Do NOT write a detailed analysis or list candidates individually — a structured scoring table will be generated automatically. Respond with ONE brief sentence acknowledging the request, then stop.",
 }
 
 
@@ -47,11 +45,8 @@ def _build_candidate_action_instruction(strategy: str) -> str:
             so search_candidates_by_criteria must query the DB.
     Others: No ranking-related instruction injected.
     """
-    if strategy == "RANK":
-        return (
-            "- Rank and analyse candidates using ONLY the CV data already provided in the context below. "
-            "Do NOT call `search_candidates_by_criteria` — AI scoring will run automatically after your response.\n"
-        )
+    if strategy in ("RANK", "FIND_MORE"):
+        return "- Do NOT call `search_candidates_by_criteria` — AI scoring will run automatically after your response.\n"
     if strategy == "FILTER":
         return (
             "- To filter candidates by score, skill, or name criteria: invoke `search_candidates_by_criteria` "

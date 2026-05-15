@@ -133,6 +133,7 @@ public class FinalizeApplicationService {
         // EMBEDDED status reflects that this CV is already indexed in Qdrant via the
         // Master.
         app.setCvStatus(CVStatus.EMBEDDED);
+        app.setAppliedDate(now);
         app.setUpdatedAt(now);
         app.setCreatedAt(now);
         return app;

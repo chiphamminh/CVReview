@@ -84,23 +84,20 @@ NOTE: Do NOT include learningPath. This is an HR tool for recruiter decisions, n
         tech_score = score_data.get("technicalScore", 0)
         exp_score = score_data.get("experienceScore", 0)
         match_percent = (tech_score + exp_score) // 2
-        link = (
-            f"[Xem chi tiết CV](/hr/positions/{position_id}/applications/{app_cv_id})"
-            if app_cv_id
-            else ""
-        )
         feedback = str(score_data.get("aiAssessment", "")).replace("\n", " ").strip()
 
         return {
-            "row": f"| **{name}** | {match_percent}% {status_icon} | {feedback} | {link} |",
+            "row": f"| **{name}** | {match_percent}% {status_icon} | {feedback} |",
             "saved": saved,
+            "match_percent": match_percent,
         }
 
     except Exception as e:
         print(f"[Scoring] Error scoring {name}: {e}")
         return {
-            "row": f"| **{name}** | Lỗi | Lỗi khi chấm điểm — {str(e)} | |",
+            "row": f"| **{name}** | Lỗi | Lỗi khi chấm điểm — {str(e)} |",
             "saved": False,
+            "match_percent": -1,
         }
 
 
@@ -139,23 +136,19 @@ async def hr_scoring_node(state: HRChatState) -> HRChatState:
         ]
     )
 
-    scoring_rows = [r["row"] for r in results]
-    saved_count = sum(1 for r in results if r["saved"])
+    results_sorted = sorted(results, key=lambda r: r["match_percent"], reverse=True)
+    scoring_rows = [r["row"] for r in results_sorted]
+    saved_count = sum(1 for r in results_sorted if r["saved"])
 
     summary_header = (
         f"\n\n📊 **Kết quả đánh giá {len(scoring_rows)} ứng viên** "
         f"(đã lưu {saved_count}/{len(scoring_rows)} vào hệ thống):\n\n"
-        f"| Tên ứng viên | Độ phù hợp | Điểm nổi bật | Hành động |\n"
-        f"|---|---|---|---|\n"
+        f"| Tên ứng viên | Độ phù hợp | Điểm nổi bật |\n"
+        f"|---|---|---|\n"
     )
 
-    existing_response = state.get("llm_response", "").strip()
     new_table = summary_header + "\n".join(scoring_rows)
-
-    if existing_response and "📊" not in existing_response:
-        state["llm_response"] = existing_response + new_table
-    else:
-        state["llm_response"] = new_table.strip()
+    state["llm_response"] = new_table.strip()
 
     state["pending_scoring_candidates"] = None
     state["function_calls"] = [

@@ -24,16 +24,16 @@ def _build_llm(temperature: float = 0.3) -> ChatGoogleGenerativeAI:
         temperature=temperature,
         max_output_tokens=settings.GEMINI_MAX_TOKENS,
         google_api_key=settings.GEMINI_API_KEY,
-        # thinking_budget=0 minimises internal CoT reasoning pass (~10-15s per call).
-        # Passed via model_kwargs so it does not conflict with LangChain's internal
-        # generation_config (which owns temperature and max_output_tokens).
-        model_kwargs={"thinking_config": {"thinking_budget": 0}},
+        # thinking_budget=0 is a direct class field on _BaseGoogleGenerativeAI.
+        # Using model_kwargs={"thinking_config": ...} does NOT work — LangChain's
+        # _build_thinking_config reads self.thinking_budget, not model_kwargs keys.
+        thinking_budget=0,
     )
 
 
 def _maybe_auto_trigger_scoring(state: HRChatState) -> None:
-    """Queue scoring only for candidates not yet scored this session."""
-    if state.get("pipeline_strategy") != "RANK":
+    """Queue scoring for candidates not yet scored this session (RANK and FIND_MORE)."""
+    if state.get("pipeline_strategy") not in ("RANK", "FIND_MORE"):
         return
     if state.get("pending_scoring_candidates"):
         return
@@ -243,6 +243,7 @@ async def llm_hr_reasoning_node(state: HRChatState) -> HRChatState:
     final_response = None
     async for chunk in llm_no_tools.astream(messages):
         final_response = chunk if final_response is None else final_response + chunk
+
     state["llm_response"] = _extract_llm_text(final_response.content) if final_response else ""
 
     # Fire scoring if evaluate_candidates was not explicitly called during tool loop

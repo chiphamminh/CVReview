@@ -149,7 +149,7 @@ async def scoring_node(state: CandidateChatState) -> CandidateChatState:
         temperature=0.0,
         max_output_tokens=settings.GEMINI_MAX_TOKENS,
         google_api_key=settings.GEMINI_API_KEY,
-        model_kwargs={"thinking_config": {"thinking_budget": 0}},
+        thinking_budget=0,
     )
 
     cv_profile = build_cv_context(state["cv_context"])
