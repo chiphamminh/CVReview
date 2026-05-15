@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Space, Input, Select, Typography, Dropdown, Tooltip, message, Modal, Tag } from 'antd';
+import { Button, Space, Input, Select, Typography, Dropdown, Tooltip, message, Modal, Tag, Badge, Segmented, Checkbox } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { SearchOutlined, EyeOutlined, FileTextOutlined, DownOutlined, EditOutlined, FilterOutlined, ReloadOutlined } from '@ant-design/icons';
+import { SearchOutlined, EyeOutlined, FileTextOutlined, DownOutlined, EditOutlined, FilterOutlined, ReloadOutlined, DeleteOutlined, WarningOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useSearchParams } from 'react-router-dom';
 
@@ -33,6 +33,9 @@ const CandidatesPage = () => {
     page, pageSize, setPagination,
     clearAllFilters
   } = useCandidateStore();
+
+  const [activeTab, setActiveTab] = useState('candidates');
+  const [selectedBatchIds, setSelectedBatchIds] = useState([]);
 
   // Parse URL search params once on mount
   useEffect(() => {
@@ -75,6 +78,13 @@ const CandidatesPage = () => {
       page,
       size: pageSize,
     }),
+    enabled: activeTab === 'candidates',
+  });
+
+  const { data: failedBatchesData, isLoading: isFailedLoading, refetch: refetchFailed } = useQuery({
+    queryKey: ['failed-batches'],
+    queryFn: () => candidateApi.getFailedBatches(),
+    enabled: activeTab === 'failed',
   });
 
   const { data: positionsPage } = useQuery({
@@ -85,6 +95,7 @@ const CandidatesPage = () => {
   const candidates = candidatePage?.data?.content ?? [];
   const totalElements = candidatePage?.data?.totalElements ?? 0;
   const positions = positionsPage?.data?.content ?? [];
+  const failedBatches = failedBatchesData?.data ?? [];
   const filteredJobTitle = positionFilter ? positions.find(p => p.id === positionFilter)?.seniority + " " + positions.find(p => p.id === positionFilter)?.title : null;
 
   const updateStageMutation = useMutation({
@@ -128,9 +139,31 @@ const CandidatesPage = () => {
     onError: () => message.error('Failed to update candidate info.'),
   });
 
+  const deleteFailedMutation = useMutation({
+    mutationFn: (batchIds) => candidateApi.deleteFailedBatches(batchIds),
+    onSuccess: () => {
+      message.success('Failed CVs deleted successfully.');
+      setSelectedBatchIds([]);
+      queryClient.invalidateQueries({ queryKey: ['failed-batches'] });
+    },
+    onError: () => message.error('Failed to delete CVs.'),
+  });
+
   const handleClearAllFilters = () => {
     clearAllFilters();
     setSearchParams({});
+  };
+
+  const handleDeleteSelected = () => {
+    Modal.confirm({
+      title: `Delete ${selectedBatchIds.length} failed batch${selectedBatchIds.length > 1 ? 'es' : ''}?`,
+      icon: <WarningOutlined style={{ color: '#ff4d4f' }} />,
+      content: 'All CV files in the selected batches will be permanently deleted. This cannot be undone.',
+      okText: 'Delete',
+      okButtonProps: { danger: true },
+      cancelText: 'Cancel',
+      onOk: () => deleteFailedMutation.mutate(selectedBatchIds),
+    });
   };
 
   const getActionMenuItems = (record) => {
@@ -265,114 +298,265 @@ const CandidatesPage = () => {
     },
   ];
 
-  if (isCandLoading && candidates.length === 0) {
+  const failedColumns = [
+    {
+      title: '',
+      key: 'checkbox',
+      width: 40,
+      render: (_, record) => (
+        <Checkbox
+          checked={selectedBatchIds.includes(record.batchId)}
+          onChange={(e) => {
+            setSelectedBatchIds(prev =>
+              e.target.checked
+                ? [...prev, record.batchId]
+                : prev.filter(id => id !== record.batchId)
+            );
+          }}
+        />
+      ),
+    },
+    {
+      title: 'Batch ID',
+      dataIndex: 'batchId',
+      key: 'batchId',
+      render: (id) => (
+        <Tooltip title={id}>
+          <Text code style={{ fontSize: 16 }}>{id?.length > 24 ? id.substring(0, 24) + '…' : id}</Text>
+        </Tooltip>
+      ),
+    },
+    {
+      title: 'Position',
+      dataIndex: 'positionTitle',
+      key: 'positionTitle',
+      render: (title) => title || <Text type="secondary">-</Text>,
+    },
+    {
+      title: 'Failed CVs',
+      dataIndex: 'failedCount',
+      key: 'failedCount',
+      width: 100,
+      render: (count) => <Tag color="red">{count} file{count !== 1 ? 's' : ''}</Tag>,
+    },
+    {
+      title: 'Uploaded At',
+      dataIndex: 'uploadedAt',
+      key: 'uploadedAt',
+      render: (date) => date ? dayjs(date).format('DD/MM/YYYY HH:mm') : '-',
+    },
+    {
+      title: 'Failed At',
+      dataIndex: 'failedAt',
+      key: 'failedAt',
+      render: (date) => date ? dayjs(date).format('DD/MM/YYYY HH:mm') : '-',
+    },
+    {
+      title: 'Error',
+      dataIndex: 'errorMessage',
+      key: 'errorMessage',
+      render: (msg) => msg
+        ? <Paragraph ellipsis={{ rows: 2, tooltip: msg }} style={{ margin: 0, fontSize: 12, color: '#cf1322' }}>{msg}</Paragraph>
+        : <Text type="secondary">-</Text>,
+    },
+    {
+      title: 'Actions',
+      key: 'action',
+      fixed: 'right',
+      width: 80,
+      render: (_, record) => (
+        <Tooltip title="Delete batch">
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            loading={deleteFailedMutation.isPending}
+            onClick={() => {
+              Modal.confirm({
+                title: 'Delete this failed batch?',
+                icon: <WarningOutlined style={{ color: '#ff4d4f' }} />,
+                content: `${record.failedCount} CV file${record.failedCount !== 1 ? 's' : ''} will be permanently deleted.`,
+                okText: 'Delete',
+                okButtonProps: { danger: true },
+                cancelText: 'Cancel',
+                onOk: () => deleteFailedMutation.mutate([record.batchId]),
+              });
+            }}
+          />
+        </Tooltip>
+      ),
+    },
+  ];
+
+  if (isCandLoading && candidates.length === 0 && activeTab === 'candidates') {
     return <LoadingSkeleton rows={12} />;
   }
 
+  const allSelected = failedBatches.length > 0 && selectedBatchIds.length === failedBatches.length;
+  const someSelected = selectedBatchIds.length > 0 && !allSelected;
+
   return (
     <div>
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Title level={4} style={{ margin: 0 }}>
           Candidates Management
-          {filteredJobTitle && <span style={{ color: '#1677ff', marginLeft: 8 }}>- {filteredJobTitle}</span>}
+          {activeTab === 'candidates' && filteredJobTitle && (
+            <span style={{ color: '#1677ff', marginLeft: 8 }}>- {filteredJobTitle}</span>
+          )}
         </Title>
+        <Segmented
+          value={activeTab}
+          onChange={(val) => {
+            setActiveTab(val);
+            setSelectedBatchIds([]);
+          }}
+          options={[
+            { label: 'Candidates', value: 'candidates' },
+            {
+              label: (
+                <Space size={6}>
+                  <span>Failed CVs</span>
+                  <Badge count={failedBatches.length} style={{ backgroundColor: failedBatches.length > 0 ? '#ff4d4f' : '#d9d9d9' }} />
+                </Space>
+              ),
+              value: 'failed',
+            },
+          ]}
+        />
       </div>
 
-      <div style={{ marginBottom: 16, display: 'flex', flexWrap: 'wrap', gap: 16, background: '#fafafa', padding: 16, borderRadius: 8 }}>
-        <Input
-          placeholder="Search name or email..."
-          prefix={<SearchOutlined />}
-          style={{ width: 250 }}
-          value={searchInput}
-          onChange={e => setSearchInput(e.target.value)}
-          allowClear
-        />
-        <Select
-          allowClear
-          showSearch
-          optionFilterProp="label"
-          placeholder="Filter by Position"
-          style={{ width: 250 }}
-          value={positionFilter}
-          onChange={val => setPositionFilter(val ?? null)}
-          options={positions.map(p => ({ value: p.id, label: p.seniority ? `${p.seniority} ${p.title}` : p.title }))}
-        />
-        <Select
-          allowClear
-          placeholder="Filter by Source Type"
-          style={{ width: 150 }}
-          value={typeFilter}
-          onChange={val => setTypeFilter(val ?? null)}
-          options={[
-            { value: 'INTERNAL', label: 'Internal' },
-            { value: 'EXTERNAL', label: 'External' },
-          ]}
-        />
-        <Select
-          allowClear
-          placeholder="Filter by Stage"
-          style={{ width: 200 }}
-          value={stageFilter}
-          onChange={val => setStageFilter(val ?? null)}
-          options={[
-            { value: 'APPLIED', label: 'Applied' },
-            { value: 'INTERVIEW_SCHEDULED', label: 'Interview Scheduled' },
-            { value: 'INTERVIEWED', label: 'Interviewed' },
-            { value: 'OFFER', label: 'Offer Extended' },
-            { value: 'ACCEPTED', label: 'Accepted' },
-            { value: 'REJECTED', label: 'Rejected' },
-          ]}
-        />
-        <Select
-          allowClear
-          placeholder="Scoring Status"
-          style={{ width: 140 }}
-          value={isScoredFilter}
-          onChange={val => setIsScoredFilter(val ?? null)}
-          options={[
-            { value: true, label: 'Scored' },
-            { value: false, label: 'Not Scored' },
-          ]}
-        />
-        <Select
-          allowClear
-          placeholder="Sort by"
-          style={{ width: 160 }}
-          value={scoreSort}
-          onChange={val => setScoreSort(val ?? null)}
-          options={[
-            { value: 'desc', label: 'Highest Score' },
-            { value: 'asc', label: 'Lowest Score' },
-          ]}
-        />
-        <Button icon={<FilterOutlined />} onClick={handleClearAllFilters} danger type="dashed">
-          Clear All
-        </Button>
-        <Button icon={<ReloadOutlined />} onClick={() => refetchCandidates()} loading={isCandFetching} style={{ marginLeft: 'auto' }}>
-          Refresh
-        </Button>
-      </div>
+      {activeTab === 'candidates' && (
+        <div style={{ marginBottom: 16, display: 'flex', flexWrap: 'wrap', gap: 16, background: '#fafafa', padding: 16, borderRadius: 8 }}>
+          <Input
+            placeholder="Search name or email..."
+            prefix={<SearchOutlined />}
+            style={{ width: 250 }}
+            value={searchInput}
+            onChange={e => setSearchInput(e.target.value)}
+            allowClear
+          />
+          <Select
+            allowClear
+            showSearch
+            placeholder="Filter by Position"
+            style={{ width: 250 }}
+            value={positionFilter}
+            onChange={val => setPositionFilter(val ?? null)}
+            options={positions.map(p => ({ value: p.id, label: p.seniority ? `${p.seniority} ${p.title}` : p.title }))}
+          />
+          <Select
+            allowClear
+            placeholder="Filter by Source Type"
+            style={{ width: 150 }}
+            value={typeFilter}
+            onChange={val => setTypeFilter(val ?? null)}
+            options={[
+              { value: 'INTERNAL', label: 'Internal' },
+              { value: 'EXTERNAL', label: 'External' },
+            ]}
+          />
+          <Select
+            allowClear
+            placeholder="Filter by Stage"
+            style={{ width: 200 }}
+            value={stageFilter}
+            onChange={val => setStageFilter(val ?? null)}
+            options={[
+              { value: 'APPLIED', label: 'Applied' },
+              { value: 'INTERVIEW_SCHEDULED', label: 'Interview Scheduled' },
+              { value: 'INTERVIEWED', label: 'Interviewed' },
+              { value: 'OFFER', label: 'Offer Extended' },
+              { value: 'ACCEPTED', label: 'Accepted' },
+              { value: 'REJECTED', label: 'Rejected' },
+            ]}
+          />
+          <Select
+            allowClear
+            placeholder="Scoring Status"
+            style={{ width: 140 }}
+            value={isScoredFilter}
+            onChange={val => setIsScoredFilter(val ?? null)}
+            options={[
+              { value: true, label: 'Scored' },
+              { value: false, label: 'Not Scored' },
+            ]}
+          />
+          <Select
+            allowClear
+            placeholder="Sort by"
+            style={{ width: 160 }}
+            value={scoreSort}
+            onChange={val => setScoreSort(val ?? null)}
+            options={[
+              { value: 'desc', label: 'Highest Score' },
+              { value: 'asc', label: 'Lowest Score' },
+            ]}
+          />
+          <Button icon={<FilterOutlined />} onClick={handleClearAllFilters} danger type="dashed">
+            Clear All
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={() => refetchCandidates()} loading={isCandFetching} style={{ marginLeft: 'auto' }}>
+            Refresh
+          </Button>
+        </div>
+      )}
 
-      <AppTable
-        columns={columns}
-        dataSource={candidates}
-        rowKey="cvId"
-        loading={
-          isCandLoading ||
-          updateStageMutation.isPending ||
-          scheduleMutation.isPending ||
-          updateCVMutation.isPending ||
-          offerMutation.isPending
-        }
-        pagination={{
-          current: page + 1,
-          pageSize,
-          total: totalElements,
-        }}
-        onChange={(pagination) => {
-          setPagination(pagination.current - 1, pagination.pageSize);
-        }}
-      />
+      {activeTab === 'failed' && (
+        <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, background: '#fff2f0', padding: '10px 16px', borderRadius: 8, border: '1px solid #ffccc7' }}>
+          <Checkbox
+            indeterminate={someSelected}
+            checked={allSelected}
+            onChange={(e) => setSelectedBatchIds(e.target.checked ? failedBatches.map(b => b.batchId) : [])}
+          >
+            Select all
+          </Checkbox>
+          <Button
+            danger
+            icon={<DeleteOutlined />}
+            disabled={selectedBatchIds.length === 0}
+            loading={deleteFailedMutation.isPending}
+            onClick={handleDeleteSelected}
+          >
+            Delete Selected ({selectedBatchIds.length})
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={() => refetchFailed()} style={{ marginLeft: 'auto' }}>
+            Refresh
+          </Button>
+        </div>
+      )}
+
+      {activeTab === 'candidates' && (
+        <AppTable
+          columns={columns}
+          dataSource={candidates}
+          rowKey="cvId"
+          loading={
+            isCandLoading ||
+            updateStageMutation.isPending ||
+            scheduleMutation.isPending ||
+            updateCVMutation.isPending ||
+            offerMutation.isPending
+          }
+          pagination={{
+            current: page + 1,
+            pageSize,
+            total: totalElements,
+          }}
+          onChange={(pagination) => {
+            setPagination(pagination.current - 1, pagination.pageSize);
+          }}
+        />
+      )}
+
+      {activeTab === 'failed' && (
+        <AppTable
+          columns={failedColumns}
+          dataSource={failedBatches}
+          rowKey="batchId"
+          loading={isFailedLoading || deleteFailedMutation.isPending}
+          pagination={false}
+        />
+      )}
 
       <Modal
         title="AI Analysis Details"

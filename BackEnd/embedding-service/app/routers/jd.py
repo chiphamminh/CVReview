@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 
 from app.services.qdrant import qdrant_service
@@ -6,6 +7,28 @@ from app.config import get_settings
 
 settings = get_settings()
 router = APIRouter()
+
+
+class JDMetadataUpdate(BaseModel):
+    positionTitle: str
+    seniority: str
+
+
+@router.put("/{position_id}/metadata")
+async def update_jd_metadata(position_id: int, body: JDMetadataUpdate):
+    """Update positionTitle and seniority payload for all JD chunks of a position."""
+    success = qdrant_service.update_jd_metadata(
+        collection_name=settings.JD_COLLECTION_NAME,
+        position_id=position_id,
+        position_title=body.positionTitle,
+        seniority=body.seniority,
+    )
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update metadata for JD {position_id}",
+        )
+    return {"message": f"Updated metadata for JD {position_id}", "positionId": position_id}
 
 
 @router.delete("/{position_id}")

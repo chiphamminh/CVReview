@@ -121,6 +121,7 @@ public interface CandidateCVRepository extends JpaRepository<CandidateCV, Intege
                      "WHERE (:keyword IS NULL OR :keyword = '' OR LOWER(c.name) LIKE LOWER(CONCAT('%', :keyword, '%')) OR LOWER(c.email) LIKE LOWER(CONCAT('%', :keyword, '%'))) "
                      +
                      "AND c.position IS NOT NULL " +
+                     "AND c.cvStatus != :failedStatus " +
                      "AND (:positionId IS NULL OR c.position.id = :positionId) " +
                      "AND (:stage IS NULL OR c.recruitmentStage = :stage) " +
                      "AND (:sourceType IS NULL OR c.sourceType = :sourceType) " +
@@ -140,7 +141,12 @@ public interface CandidateCVRepository extends JpaRepository<CandidateCV, Intege
                      @Param("cvStatus") CVStatus cvStatus,
                      @Param("isScored") Boolean isScored,
                      @Param("scoreSort") String scoreSort,
+                     @Param("failedStatus") CVStatus failedStatus,
                      Pageable pageable);
+
+       List<CandidateCV> findAllByCvStatusAndDeletedAtIsNull(CVStatus cvStatus);
+
+       List<CandidateCV> findByBatchIdInAndCvStatus(List<String> batchIds, CVStatus cvStatus);
 
        /** Tìm các CV đã qua ngày phỏng vấn mà vẫn đang ở stage INTERVIEW_SCHEDULED. */
        @Query("SELECT c FROM CandidateCV c " +

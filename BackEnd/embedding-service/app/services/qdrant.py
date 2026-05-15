@@ -205,6 +205,27 @@ class QdrantService:
             print(f"Error updating applied positions for CV {cv_id}: {e}")
             return False
     
+    def update_jd_metadata(self, collection_name: str, position_id: int, position_title: str, seniority: str) -> bool:
+        """
+        Overwrite positionTitle and seniority for all JD chunks of a position.
+        Called when position metadata changes — avoids full re-embedding since vectors are unchanged.
+        """
+        try:
+            client = self._get_client()
+            filter_condition = Filter(
+                must=[FieldCondition(key="positionId", match=MatchValue(value=position_id))]
+            )
+            client.set_payload(
+                collection_name=collection_name,
+                payload={"positionTitle": position_title, "seniority": seniority},
+                points=filter_condition,
+            )
+            print(f"[Qdrant] Updated positionTitle/seniority for position {position_id}")
+            return True
+        except Exception as e:
+            print(f"[Qdrant] Error updating JD metadata for position {position_id}: {e}")
+            return False
+
     def get_collection_info(self, collection_name: str) -> dict | None:
         try:
             client = self._get_client()

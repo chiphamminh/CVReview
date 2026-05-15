@@ -23,8 +23,12 @@ import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.example.recruitmentservice.models.enums.RecruitmentStage;
 import org.example.recruitmentservice.models.enums.SourceType;
@@ -225,7 +229,7 @@ public class CandidateCVService {
         // JPQL handles the sorting logic natively, so we pass an unsorted Pageable
         Pageable pageable = PageRequest.of(page, size);
         Page<CandidateCV> cvPage = candidateCVRepository.filterCandidates(keyword, positionId, stage, sourceType,
-                cvStatus, isScored, scoreSort, pageable);
+                cvStatus, isScored, scoreSort, CVStatus.FAILED, pageable);
 
         Page<CandidateCVResponse> mappedPage = cvPage.map(cv -> {
             CVAnalysis cvAnalysis = cv.getAnalysis();
@@ -385,5 +389,80 @@ public class CandidateCVService {
         cv.setRecruitmentStage(newStage);
         cv.setUpdatedAt(LocalDateTime.now());
         candidateCVRepository.save(cv);
+    }
+
+    public ApiResponse<List<org.example.recruitmentservice.dto.response.FailedBatchSummary>> getFailedBatches() {
+        List<CandidateCV> failedCVs = candidateCVRepository.findAllByCvStatusAndDeletedAtIsNull(CVStatus.FAILED);
+
+        Map<String, List<CandidateCV>> byBatch = failedCVs.stream()
+                .filter(cv -> cv.getBatchId() != null)
+                .collect(Collectors.groupingBy(CandidateCV::getBatchId));
+
+        List<org.example.recruitmentservice.dto.response.FailedBatchSummary> summaries = byBatch.entrySet().stream()
+                .map(entry -> {
+                    List<CandidateCV> batch = entry.getValue();
+                    CandidateCV first = batch.get(0);
+                    Positions position = first.getPosition();
+
+                    LocalDateTime uploadedAt = batch.stream()
+                            .map(CandidateCV::getCreatedAt)
+                            .filter(Objects::nonNull)
+                            .min(Comparator.naturalOrder())
+                            .orElse(null);
+
+                    LocalDateTime failedAt = batch.stream()
+                            .map(CandidateCV::getFailedAt)
+                            .filter(Objects::nonNull)
+                            .max(Comparator.naturalOrder())
+                            .orElse(null);
+
+                    String errorMessage = batch.stream()
+                            .map(CandidateCV::getErrorMessage)
+                            .filter(msg -> msg != null && !msg.isBlank())
+                            .findFirst()
+                            .orElse(null);
+
+                    return org.example.recruitmentservice.dto.response.FailedBatchSummary.builder()
+                            .batchId(entry.getKey())
+                            .positionId(position != null ? position.getId() : null)
+                            .positionTitle(position != null
+                                    ? PositionUtils.formatPositionTitle(position.getSeniority(), position.getTitle())
+                                    : null)
+                            .failedCount(batch.size())
+                            .uploadedAt(uploadedAt)
+                            .failedAt(failedAt)
+                            .errorMessage(errorMessage)
+                            .build();
+                })
+                .sorted(Comparator.comparing(
+                        org.example.recruitmentservice.dto.response.FailedBatchSummary::getFailedAt,
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .collect(Collectors.toList());
+
+        return new ApiResponse<>(ErrorCode.SUCCESS.getCode(), "Failed batches retrieved successfully", summaries);
+    }
+
+    @Transactional
+    public void deleteFailedCVsByBatches(List<String> batchIds) {
+        List<CandidateCV> toDelete = candidateCVRepository.findByBatchIdInAndCvStatus(batchIds, CVStatus.FAILED);
+
+        for (CandidateCV cv : toDelete) {
+            try {
+                String url = embeddingServiceUrl + "/cv/" + cv.getId();
+                restTemplate.delete(url);
+            } catch (Exception e) {
+                log.warn("[CV] Failed to delete embeddings for CV {}: {}", cv.getId(), e.getMessage());
+            }
+
+            try {
+                if (cv.getDriveFileId() != null) {
+                    storageService.deleteFile(cv.getDriveFileId());
+                }
+            } catch (Exception e) {
+                throw new CustomException(ErrorCode.FILE_DELETE_FAILED);
+            }
+
+            candidateCVRepository.delete(cv);
+        }
     }
 }

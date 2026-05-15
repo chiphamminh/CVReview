@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import org.example.recruitmentservice.dto.response.FailedBatchSummary;
 
 @RestController
 @RequestMapping("/cv")
@@ -125,6 +126,21 @@ public class CandidateCVController {
                 return ResponseEntity.ok(new ApiResponse<>(
                                 ErrorCode.SUCCESS.getCode(),
                                 "Offer sent successfully"));
+        }
+
+        @PreAuthorize("hasRole('HR')")
+        @GetMapping("/failed-batches")
+        public ApiResponse<List<FailedBatchSummary>> getFailedBatches() {
+                return candidateCVService.getFailedBatches();
+        }
+
+        @PreAuthorize("hasRole('HR')")
+        @DeleteMapping("/failed-batches")
+        public ResponseEntity<ApiResponse<Object>> deleteFailedBatches(@RequestBody List<String> batchIds) {
+                candidateCVService.deleteFailedCVsByBatches(batchIds);
+                return ResponseEntity.ok(new ApiResponse<>(
+                                ErrorCode.SUCCESS.getCode(),
+                                "Failed CVs deleted successfully"));
         }
 
         @PreAuthorize("hasRole('HR')")

@@ -19,4 +19,6 @@ export const candidateApi = {
     return axiosClient.post(`/cv/${cvId}/send-offer`, fd);
   },
   updateStage: (cvId, stage) => axiosClient.patch(`/cv/${cvId}/stage`, { recruitmentStage: stage }),
+  getFailedBatches: () => axiosClient.get('/cv/failed-batches'),
+  deleteFailedBatches: (batchIds) => axiosClient.delete('/cv/failed-batches', { data: batchIds }),
 };

@@ -227,7 +227,7 @@ public class PositionService {
                 headers.set("X-Internal-Service", "chatbot-service");
                 headers.setContentType(MediaType.APPLICATION_JSON);
                 HttpEntity<String> entity = new HttpEntity<>("{\"score\":" + score + "}", headers);
-                restTemplate.exchange(url, HttpMethod.PATCH, entity, Void.class);
+                restTemplate.exchange(url, HttpMethod.PUT, entity, Void.class);
             } catch (Exception e) {
                 log.warn("[Position] Failed to sync minimumFitScore to chatbot for position {}: {}",
                         positionId, e.getMessage());
@@ -259,13 +259,17 @@ public class PositionService {
     }
 
     /**
-     * Update metadata của một Position (title, seniority, skills, minimumFitScore).
+     * Update metadata của một Position (title, seniority, skills).
      * File JD không được phép cập nhật — nếu cần đổi JD, xóa position và tạo mới.
+     * Nếu title hoặc seniority thay đổi, sync lại positionTitle/seniority trên Qdrant (fire-and-forget).
      */
     @Transactional
     public void updatePosition(Integer positionId, PositionsRequest positionsRequest) {
         Positions position = positionRepository.findById(positionId)
                 .orElseThrow(() -> new CustomException(ErrorCode.POSITION_NOT_FOUND));
+
+        String oldTitle = position.getTitle();
+        String oldSeniority = position.getSeniority();
 
         if (positionsRequest.getTitle() != null && !positionsRequest.getTitle().trim().isEmpty()) {
             position.setTitle(positionsRequest.getTitle().trim());
@@ -279,6 +283,35 @@ public class PositionService {
 
         position.setUpdatedAt(LocalDateTime.now());
         positionRepository.save(position);
+
+        boolean metadataChanged = !position.getTitle().equals(oldTitle)
+                || !position.getSeniority().equals(oldSeniority);
+        if (metadataChanged) {
+            String newPositionTitle = PositionUtils.formatPositionTitle(
+                    position.getSeniority(), position.getTitle());
+            syncPositionMetadataToQdrant(positionId, newPositionTitle, position.getSeniority());
+        }
+    }
+
+    /**
+     * Fire-and-forget PATCH to embedding-service to update JD chunk metadata in Qdrant.
+     * Failure only logs — does not block or rollback the position update.
+     */
+    private void syncPositionMetadataToQdrant(int positionId, String positionTitle, String seniority) {
+        String url = embeddingServiceUrl + "/jd/" + positionId + "/metadata";
+        CompletableFuture.runAsync(() -> {
+            try {
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                Map<String, String> body = Map.of("positionTitle", positionTitle, "seniority", seniority);
+                HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, headers);
+                restTemplate.exchange(url, HttpMethod.PUT, entity, Void.class);
+                log.info("[Position] Synced positionTitle/seniority to Qdrant for position {}", positionId);
+            } catch (Exception e) {
+                log.warn("[Position] Failed to sync metadata to Qdrant for position {}: {}",
+                        positionId, e.getMessage());
+            }
+        });
     }
 
     @Transactional

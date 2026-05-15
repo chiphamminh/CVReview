@@ -12,7 +12,7 @@ class UpdateScoreRequest(BaseModel):
     score: float
 
 
-@router.patch("/internal/positions/{position_id}/minimum-fit-score")
+@router.put("/internal/positions/{position_id}/minimum-fit-score")
 async def update_position_score(
     position_id: int,
     body: UpdateScoreRequest,
