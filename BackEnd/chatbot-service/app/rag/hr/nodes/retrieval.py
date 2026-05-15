@@ -205,6 +205,10 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
     else:
         base_filters = _build_candidate_base_filters(position_id)
 
+    # EXTERNAL mode skips the cross-encoder: rrf_score is sufficient as query-relevance
+    # tiebreaker since avg_score (pre-computed by candidate chatbot) is the primary signal.
+    is_external = state["mode"] == "EXTERNAL"
+
     # ---- HYBRID RETRIEVAL + JD fetch — run concurrently ----
     # hybrid_retrieve_cv uses expanded_query for better CV recall.
     # _fetch_jd_context uses the original query for prompt-relevance (not expansion).
@@ -217,9 +221,21 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
             exclude_cv_ids=exclude_ids if exclude_ids else None,
             skill_keywords=skill_keywords,
             skill_logic=skill_logic,
+            skip_rerank=is_external,
         ),
         _fetch_jd_context(position_id, query),
     )
+
+    # EXTERNAL dual-sort: primary = avg_score (JD fit, static), tiebreaker = rrf_score (query relevance)
+    if is_external:
+        cv_id_to_meta = state.get("cv_id_to_meta", {})
+        def _external_sort_key(chunk: Dict[str, Any]) -> tuple:
+            cv_id = chunk.get("payload", {}).get("cvId")
+            meta  = cv_id_to_meta.get(cv_id, {})
+            avg   = (meta.get("score") or 0)
+            rrf   = chunk.get("rrf_score", 0.0)
+            return (avg, rrf)
+        cv_results = sorted(cv_results, key=_external_sort_key, reverse=True)
 
     state["cv_context"] = cv_results
     state["jd_context"] = jd_results

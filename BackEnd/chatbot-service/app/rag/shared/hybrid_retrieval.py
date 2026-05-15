@@ -192,6 +192,7 @@ async def hybrid_retrieve_cv(
     exclude_cv_ids: Optional[List[int]] = None,
     skill_keywords: Optional[List[str]] = None,
     skill_logic: str = "OR",
+    skip_rerank: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Hybrid retrieval for CV collection: Dense + Keyword → RRF → Cross-encoder rerank.
@@ -251,6 +252,32 @@ async def hybrid_retrieve_cv(
         if cv_chunk_count.get(cv_id, 0) < _MAX_CHUNKS_PER_CV:
             capped.append(doc)
             cv_chunk_count[cv_id] = cv_chunk_count.get(cv_id, 0) + 1
+
+    # EXTERNAL mode: skip cross-encoder — rrf_score is sufficient as tiebreaker
+    # since avg_score (from cv_analysis) is the primary ranking signal.
+    if skip_rerank:
+        chunks_by_id: Dict[Any, List[Dict[str, Any]]] = {}
+        best_rrf_by_id: Dict[Any, float] = {}
+        for doc in capped:
+            cv_id = doc.get("payload", {}).get("cvId")
+            if cv_id is None:
+                continue
+            rrf = doc.get("rrf_score", 0.0)
+            if cv_id not in chunks_by_id:
+                chunks_by_id[cv_id] = []
+                best_rrf_by_id[cv_id] = rrf
+            else:
+                if rrf > best_rrf_by_id[cv_id]:
+                    best_rrf_by_id[cv_id] = rrf
+            chunks_by_id[cv_id].append(doc)
+
+        ranked_ids = sorted(best_rrf_by_id.keys(), key=lambda k: best_rrf_by_id[k], reverse=True)[:top_n]
+        result: List[Dict[str, Any]] = []
+        for cv_id in ranked_ids:
+            result.extend(chunks_by_id[cv_id])
+
+        print(f"[HybridRetrieve] skip_rerank: {len(capped)} chunks → {len(ranked_ids)} unique CVs ({len(result)} total chunks)")
+        return result
 
     # Cross-encoder rerank — run in executor to avoid blocking the event loop
     reranked = await reranker.rerank_and_group_async(

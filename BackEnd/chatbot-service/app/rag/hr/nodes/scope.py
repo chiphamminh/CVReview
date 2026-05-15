@@ -21,7 +21,9 @@ async def load_candidate_scope_node(state: HRChatState) -> HRChatState:
         # Fast cvId → metadata lookup
         state["cv_id_to_meta"] = {}
         for app in filtered_apps:
-            if target_source == "CANDIDATE" and app.get("masterCvId") is not None:
+            # EXTERNAL CVs: Qdrant stores the Master CV (masterCvId = cvId in Qdrant payload)
+            # INTERNAL CVs: Qdrant stores the HR-uploaded CV (appCvId = cvId in Qdrant payload)
+            if target_source == "EXTERNAL" and app.get("masterCvId") is not None:
                 state["cv_id_to_meta"][app["masterCvId"]] = app
             elif app.get("appCvId") is not None:
                 state["cv_id_to_meta"][app["appCvId"]] = app

@@ -33,6 +33,9 @@ def _build_llm(temperature: float = 0.3) -> ChatGoogleGenerativeAI:
 
 def _maybe_auto_trigger_scoring(state: HRChatState) -> None:
     """Queue scoring for candidates not yet scored this session (RANK and FIND_MORE)."""
+    if state.get("mode") == "EXTERNAL":
+        print("[Reasoning] EXTERNAL mode → skip scoring, existing cv_analysis scores will be used")
+        return
     if state.get("pipeline_strategy") not in ("RANK", "FIND_MORE"):
         return
     if state.get("pending_scoring_candidates"):
@@ -190,6 +193,14 @@ async def llm_hr_reasoning_node(state: HRChatState) -> HRChatState:
 
         # Intercept evaluate_candidates → delegate to hr_scoring_node
         if tool_name == "evaluate_candidates":
+            # EXTERNAL mode: scores already exist in cv_analysis — never re-score
+            if state.get("mode") == "EXTERNAL":
+                tool_result = "Điểm của các ứng viên đã được tính sẵn từ hệ thống. Vui lòng tham khảo bảng điểm trong ngữ cảnh."
+                executed_calls.append({"name": tool_name, "arguments": tool_args, "result": tool_result})
+                messages.append(ToolMessage(content=tool_result, tool_call_id=call["id"]))
+                print("[Scoring] Intercepted evaluate_candidates in EXTERNAL mode → blocked, scores already exist")
+                continue
+
             cv_id_to_meta  = state.get("cv_id_to_meta", {})
             cv_ids_in_ctx: set = {
                 chunk.get("payload", {}).get("cvId")
