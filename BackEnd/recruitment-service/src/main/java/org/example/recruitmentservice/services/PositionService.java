@@ -99,6 +99,7 @@ public class PositionService {
         position.setDriveFileId(driveFileInfo.getFileId());
         position.setDriveFileUrl(driveFileInfo.getWebViewLink());
         position.setBatchId(batchId);
+        position.setMinimumFitScore(70.0);
         position.setStatus(JDStatus.PENDING);
         position.setOpenedAt(LocalDateTime.now());
         position.setCreatedAt(LocalDateTime.now());

@@ -28,12 +28,12 @@ const STAGE_CONFIG = {
 };
 
 const STAGE_HEX = {
-  APPLIED:             '#1677ff',
+  APPLIED: '#1677ff',
   INTERVIEW_SCHEDULED: '#fa8c16',
-  INTERVIEWED:         '#531dab',
-  OFFER:               '#13c2c2',
-  ACCEPTED:            '#52c41a',
-  REJECTED:            '#f5222d',
+  INTERVIEWED: '#531dab',
+  OFFER: '#13c2c2',
+  ACCEPTED: '#52c41a',
+  REJECTED: '#f5222d',
 };
 
 const MATCH_STATUS_COLOR = {
@@ -134,6 +134,7 @@ const PositionCard = ({ position, applicationData }) => {
   };
 
   const skillTags = Array.isArray(position.skills) ? position.skills : [];
+  const minimumFitScore = position.minimumFitScore != null ? Math.round(position.minimumFitScore) : null;
   const hasAnalysis = applicationData?.overallStatus != null;
   const score = applicationData
     ? Math.round(((applicationData.technicalScore ?? 0) + (applicationData.experienceScore ?? 0)) / 2)
@@ -147,7 +148,7 @@ const PositionCard = ({ position, applicationData }) => {
     >
       {/* Header */}
       <div style={{ marginBottom: 12 }}>
-        <Text type="secondary" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 }}>
+        <Text style={{ fontSize: 20, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 1 }}>
           {position.seniority}
         </Text>
         <Title level={4} style={{ margin: '4px 0 0', color: '#1677ff', lineHeight: 1.2 }}>
@@ -164,10 +165,19 @@ const PositionCard = ({ position, applicationData }) => {
         </Space>
       )}
 
-      <Text type="secondary" style={{ marginBottom: 16, display: 'block', fontSize: 13 }}>
-        <CalendarOutlined style={{ marginRight: 6 }} />
-        Posted: {dayjs(position.openedAt).format('DD MMM YYYY')}
-      </Text>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <Text type="secondary" style={{ fontSize: 13 }}>
+          <CalendarOutlined style={{ marginRight: 6 }} />
+          Posted: {dayjs(position.openedAt).format('DD MMM YYYY')}
+        </Text>
+        {minimumFitScore != null && (
+          <Tooltip title="Minimum fit score required for this position">
+            <Tag color="volcano" style={{ margin: 0, fontWeight: 600 }}>
+              Min. Score: {minimumFitScore}
+            </Tag>
+          </Tooltip>
+        )}
+      </div>
 
       {/* Application analysis block */}
       {applicationData && (
