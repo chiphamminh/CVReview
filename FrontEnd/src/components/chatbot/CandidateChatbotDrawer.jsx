@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Drawer, Input, Button, Typography, Avatar, Result, Spin } from 'antd';
+import { Drawer, Input, Button, Avatar, Result, Spin } from 'antd';
 import { SendOutlined, RobotOutlined, UserOutlined, LoginOutlined, UploadOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import ChatMarkdown from '@/components/chatbot/ChatMarkdown';
@@ -7,8 +7,6 @@ import useAuthStore from '@/store/authStore';
 import LearningPathCard from '@/components/candidate/LearningPathCard';
 import { candidateApi } from '@/api/candidate.api';
 import { chatbotApi } from '@/api/chatbot.api';
-
-const { Title } = Typography;
 
 const CHAT_PAGE_SIZE = 10;
 
@@ -262,7 +260,7 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
       return (
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
           <Result
-            icon={<RobotOutlined style={{ color: '#1677ff' }} />}
+            icon={<RobotOutlined style={{ color: '#0D9488' }} />}
             title="Login Required"
             subTitle="Please login or register to use the AI Recruitment Assistant."
             extra={[
@@ -316,17 +314,19 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
           )}
 
           {messages.map((msg, idx) => (
-            <div key={msg.id ?? idx} style={{ display: 'flex', gap: '12px', flexDirection: msg.role === 'user' ? 'row-reverse' : 'row' }}>
+            <div key={msg.id ?? idx} className="chat-message" style={{ display: 'flex', gap: '12px', flexDirection: msg.role === 'user' ? 'row-reverse' : 'row' }}>
               <Avatar
                 icon={msg.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
-                style={{ backgroundColor: msg.role === 'user' ? '#1677ff' : '#52c41a', flexShrink: 0 }}
+                style={{ backgroundColor: msg.role === 'user' ? '#0D9488' : '#0F172A', flexShrink: 0 }}
               />
               <div style={{ maxWidth: '80%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <div style={{
                   padding: '10px 14px',
-                  borderRadius: '8px',
-                  backgroundColor: msg.role === 'user' ? '#e6f4ff' : '#f5f5f5',
-                  border: msg.role === 'user' ? '1px solid #91caff' : '1px solid #d9d9d9',
+                  borderRadius: msg.role === 'user' ? '18px 4px 18px 18px' : '4px 18px 18px 18px',
+                  background: msg.role === 'user' ? '#0D9488' : '#fff',
+                  border: msg.role === 'user' ? 'none' : '1px solid #E2E8F0',
+                  boxShadow: msg.role === 'user' ? '0 2px 8px rgba(13,148,136,0.25)' : '0 1px 4px rgba(0,0,0,0.06)',
+                  color: msg.role === 'user' ? '#fff' : '#1E293B',
                 }}>
                   <ChatMarkdown>{msg.content}</ChatMarkdown>
                 </div>
@@ -342,18 +342,25 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
           ))}
 
           {isLoading && (
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <Avatar icon={<RobotOutlined />} style={{ backgroundColor: '#52c41a', flexShrink: 0 }} />
+            <div className="chat-message" style={{ display: 'flex', gap: '12px' }}>
+              <Avatar icon={<RobotOutlined />} style={{ backgroundColor: '#0F172A', flexShrink: 0 }} />
               <div style={{
                 maxWidth: '80%',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                backgroundColor: '#f5f5f5',
-                border: '1px solid #d9d9d9',
+                padding: '12px 16px',
+                borderRadius: '4px 18px 18px 18px',
+                background: '#fff',
+                border: '1px solid #E2E8F0',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Spin size="small" />
-                  <span style={{ color: '#8c8c8c' }}>{statusMessage || 'AI is thinking...'}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div className="typing-indicator">
+                    <div className="typing-dot" />
+                    <div className="typing-dot" />
+                    <div className="typing-dot" />
+                  </div>
+                  {statusMessage && (
+                    <span style={{ color: '#94A3B8', fontSize: 13 }}>{statusMessage}</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -361,7 +368,7 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
           <div ref={messagesEndRef} />
         </div>
 
-        <div style={{ padding: '16px', borderTop: '1px solid #f0f0f0', background: '#fafafa' }}>
+        <div style={{ padding: '16px', borderTop: '1px solid #E2E8F0', background: '#F8FAFC' }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
             <Input.TextArea
               autoSize={{ minRows: 2, maxRows: 6 }}
@@ -388,9 +395,21 @@ const CandidateChatbotDrawer = ({ open, onClose }) => {
   return (
     <Drawer
       title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <RobotOutlined style={{ color: '#52c41a' }} />
-          <Title level={5} style={{ margin: 0 }}>AI Assistant</Title>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ position: 'relative', display: 'inline-flex' }}>
+            <Avatar size={32} icon={<RobotOutlined />} style={{ backgroundColor: '#0D9488' }} />
+            <span style={{
+              position: 'absolute', bottom: 1, right: 1,
+              width: 9, height: 9,
+              background: '#22C55E',
+              borderRadius: '50%',
+              border: '2px solid #fff',
+            }} />
+          </div>
+          <div style={{ lineHeight: 1.35 }}>
+            <div style={{ fontWeight: 600, fontSize: 15, color: '#0F172A' }}>AI Assistant</div>
+            <div style={{ fontSize: 11, color: '#22C55E', fontWeight: 500 }}>Online</div>
+          </div>
         </div>
       }
       placement="right"

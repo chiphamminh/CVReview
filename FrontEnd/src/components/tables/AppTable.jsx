@@ -16,6 +16,7 @@ const AppTable = ({
       dataSource={dataSource}
       loading={loading}
       rowKey={rowKey}
+      rowClassName={(_, index) => index % 2 === 0 ? 'app-table-row-even' : 'app-table-row-odd'}
       pagination={pagination ? {
         ...pagination,
         showSizeChanger: true,

@@ -113,3 +113,119 @@ body {
   font-size: 13px;
   font-family: 'SFMono-Regular', Consolas, monospace;
 }
+
+/* ─── Chat: Typing Indicator ─────────────────────────────────── */
+.typing-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.typing-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #94A3B8;
+  animation: typing-bounce 1.4s ease-in-out infinite;
+}
+
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30%           { transform: translateY(-6px); opacity: 1; }
+}
+
+/* ─── Chat: Message Entrance ─────────────────────────────────── */
+.chat-message {
+  animation: chat-enter 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes chat-enter {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Page Transition ────────────────────────────────────────── */
+.page-enter {
+  animation: page-enter 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Card Hover Effects ─────────────────────────────────────── */
+.kpi-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+  cursor: default;
+}
+
+.kpi-card:hover {
+  transform: translateY(-3px) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1) !important;
+}
+
+.position-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease !important;
+}
+
+.position-card:hover {
+  transform: translateY(-4px) !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.1) !important;
+  border-color: #C7D2FE !important;
+}
+
+/* ─── HR Sidebar Dark Theme ───────────────────────────────────── */
+
+/* Force transparent background so gradient shows through */
+.hr-sider .ant-layout-sider-children,
+.hr-sider-menu.ant-menu-dark,
+.hr-sider-menu.ant-menu-dark .ant-menu-sub {
+  background: transparent !important;
+}
+
+/* Selected item: subtle indigo highlight */
+.hr-sider-menu.ant-menu-dark .ant-menu-item-selected {
+  background: rgba(79, 70, 229, 0.28) !important;
+}
+
+/* Hover item (unselected): very subtle */
+.hr-sider-menu.ant-menu-dark .ant-menu-item:not(.ant-menu-item-selected):hover {
+  background: rgba(148, 163, 184, 0.1) !important;
+}
+
+/* Sidebar transition on collapse/expand */
+.hr-sider {
+  transition: width 0.2s ease, min-width 0.2s ease, max-width 0.2s ease !important;
+}
+
+/* ─── Table: Header & Row Striping ───────────────────────────── */
+
+/* Header row */
+.ant-table-thead > tr > th,
+.ant-table-thead > tr > td {
+  background: #F1F5F9 !important;
+  color: #475569 !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  border-bottom: 2px solid #CBD5E1 !important;
+}
+
+/* Zebra striping */
+.app-table-row-even > td {
+  background-color: #F8FAFC !important;
+}
+
+.app-table-row-odd > td {
+  background-color: #ffffff !important;
+}
+
+/* Row hover: light indigo solid — must be opaque to cover fixed sticky columns */
+.app-table-row-even:hover > td,
+.app-table-row-odd:hover > td {
+  background-color: #EEF2FF !important;
+  transition: background-color 0.15s ease;
+}

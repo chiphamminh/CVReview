@@ -306,7 +306,7 @@ const HRChatbotPage = () => {
 
   return (
     <>
-      <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: '8px', overflow: 'hidden' }}>
+      <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: '8px', overflow: 'hidden', border: '1px solid #E2E8F0', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
 
         {/* ── Left Sidebar ── */}
         <Sider
@@ -314,12 +314,12 @@ const HRChatbotPage = () => {
           collapsedWidth={44}
           collapsed={sidebarCollapsed}
           theme="light"
-          style={{ borderRight: '1px solid #f0f0f0', overflow: 'hidden', transition: 'width 0.2s' }}
+          style={{ borderRight: '1px solid #E2E8F0', overflow: 'hidden', transition: 'width 0.2s', background: '#F8FAFC' }}
         >
           {/* Sidebar header: toggle + New Chat */}
           <div style={{
             padding: '12px 8px',
-            borderBottom: '1px solid #f0f0f0',
+            borderBottom: '1px solid #E2E8F0',
             display: 'flex',
             alignItems: 'center',
             gap: 8,
@@ -371,7 +371,7 @@ const HRChatbotPage = () => {
         <Content style={{ display: 'flex', flexDirection: 'column' }}>
 
           {/* Header */}
-          <div style={{ padding: '16px 24px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ padding: '16px 24px', borderBottom: '1px solid #E2E8F0', background: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
             <Space size={12} wrap>
               <Title level={5} style={{ margin: 0 }}>AI HR Assistant</Title>
               <Select
@@ -418,27 +418,34 @@ const HRChatbotPage = () => {
               </div>
             ) : messages.length === 0 ? (
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ textAlign: 'center', color: '#bfbfbf' }}>
-                  <RobotOutlined style={{ fontSize: 48, marginBottom: 16 }} />
-                  <div>Select a position and click <strong>New Chat</strong>, or resume a session from the sidebar.</div>
+                <div style={{ textAlign: 'center' }}>
+                  <RobotOutlined style={{ fontSize: 56, marginBottom: 16, color: '#C7D2FE' }} />
+                  <div style={{ color: '#94A3B8', maxWidth: 280, lineHeight: 1.6 }}>
+                    Select a position and click{' '}
+                    <strong style={{ color: '#4F46E5' }}>New Chat</strong>
+                    , or resume a session from the sidebar.
+                  </div>
                 </div>
               </div>
             ) : (
               messages.map((msg, idx) => (
                 <div
                   key={msg.id ?? idx}
+                  className="chat-message"
                   style={{ display: 'flex', gap: '12px', flexDirection: msg.role === 'user' ? 'row-reverse' : 'row' }}
                 >
                   <Avatar
                     icon={msg.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
-                    style={{ backgroundColor: msg.role === 'user' ? '#1677ff' : '#52c41a', flexShrink: 0 }}
+                    style={{ backgroundColor: msg.role === 'user' ? '#4F46E5' : '#0F172A', flexShrink: 0 }}
                   />
                   <div style={{
                     maxWidth: '70%',
                     padding: '12px 16px',
-                    borderRadius: '8px',
-                    backgroundColor: msg.role === 'user' ? '#e6f4ff' : '#f5f5f5',
-                    border: msg.role === 'user' ? '1px solid #91caff' : '1px solid #d9d9d9',
+                    borderRadius: msg.role === 'user' ? '18px 4px 18px 18px' : '4px 18px 18px 18px',
+                    background: msg.role === 'user' ? '#4F46E5' : '#fff',
+                    border: msg.role === 'user' ? 'none' : '1px solid #E2E8F0',
+                    boxShadow: msg.role === 'user' ? '0 2px 8px rgba(79,70,229,0.25)' : '0 1px 4px rgba(0,0,0,0.06)',
+                    color: msg.role === 'user' ? '#fff' : '#1E293B',
                   }}>
                     <ChatMarkdown>{msg.content}</ChatMarkdown>
                   </div>
@@ -447,21 +454,28 @@ const HRChatbotPage = () => {
             )}
 
             {isLoading && (
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <Avatar icon={<RobotOutlined />} style={{ backgroundColor: '#52c41a', flexShrink: 0 }} />
+              <div className="chat-message" style={{ display: 'flex', gap: '12px' }}>
+                <Avatar icon={<RobotOutlined />} style={{ backgroundColor: '#0F172A', flexShrink: 0 }} />
                 <div style={{
                   maxWidth: '70%',
                   padding: '12px 16px',
-                  borderRadius: '8px',
-                  backgroundColor: '#f5f5f5',
-                  border: '1px solid #d9d9d9',
+                  borderRadius: '4px 18px 18px 18px',
+                  background: '#fff',
+                  border: '1px solid #E2E8F0',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
                 }}>
                   {streamingContent
                     ? <ChatMarkdown>{streamingContent}</ChatMarkdown>
-                    : <Space>
-                        <Spin size="small" />
-                        <span style={{ color: '#8c8c8c' }}>{statusMessage || 'AI is thinking...'}</span>
-                      </Space>
+                    : <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div className="typing-indicator">
+                          <div className="typing-dot" />
+                          <div className="typing-dot" />
+                          <div className="typing-dot" />
+                        </div>
+                        {statusMessage && (
+                          <span style={{ color: '#94A3B8', fontSize: 13 }}>{statusMessage}</span>
+                        )}
+                      </div>
                   }
                 </div>
               </div>
@@ -470,7 +484,7 @@ const HRChatbotPage = () => {
           </div>
 
           {/* Input */}
-          <div style={{ padding: '16px 24px', borderTop: '1px solid #f0f0f0', background: '#fafafa' }}>
+          <div style={{ padding: '16px 24px', borderTop: '1px solid #E2E8F0', background: '#F8FAFC' }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
               <Input.TextArea
                 autoSize={{ minRows: 2, maxRows: 6 }}

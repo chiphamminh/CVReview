@@ -1,22 +1,30 @@
 import React from 'react';
-import { Badge } from 'antd';
 
 const ScoreBadge = ({ score }) => {
   if (score === null || score === undefined) {
-    return <span style={{ color: '#8c8c8c' }}>None</span>;
+    return <span style={{ color: '#94A3B8', fontSize: 13 }}>—</span>;
   }
 
-  let color = '#52c41a'; // Green
-  if (score < 70) {
-    color = '#f5222d'; // Red
-  } else if (score < 80) {
-    color = '#faad14'; // Warning/Orange
-  }
+  let color;
+  if (score < 70)      color = '#DC2626';
+  else if (score < 80) color = '#D97706';
+  else                 color = '#16A34A';
 
   return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-      <Badge color={color} />
-      <span style={{ fontWeight: 600, color }}>{score}/100</span>
+    <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 4, minWidth: 72 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
+        <span style={{ fontWeight: 700, color, fontSize: 14, lineHeight: 1 }}>{score}</span>
+        <span style={{ color: '#94A3B8', fontSize: 11 }}>/100</span>
+      </div>
+      <div style={{ height: 4, borderRadius: 2, background: '#E2E8F0', overflow: 'hidden' }}>
+        <div style={{
+          height: '100%',
+          width: `${score}%`,
+          background: color,
+          borderRadius: 2,
+          transition: 'width 0.5s ease',
+        }} />
+      </div>
     </div>
   );
 };

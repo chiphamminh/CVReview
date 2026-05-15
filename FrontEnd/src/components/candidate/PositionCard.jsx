@@ -28,7 +28,7 @@ const STAGE_CONFIG = {
 };
 
 const STAGE_HEX = {
-  APPLIED: '#1677ff',
+  APPLIED: '#4F46E5',
   INTERVIEW_SCHEDULED: '#fa8c16',
   INTERVIEWED: '#531dab',
   OFFER: '#13c2c2',
@@ -143,7 +143,8 @@ const PositionCard = ({ position, applicationData }) => {
   return (
     <Card
       hoverable
-      style={{ borderRadius: 8, border: '1px solid #f0f0f0', height: '100%', display: 'flex', flexDirection: 'column' }}
+      className="position-card"
+      style={{ borderRadius: 8, border: '1px solid #E2E8F0', height: '100%', display: 'flex', flexDirection: 'column' }}
       styles={{ body: { padding: '24px', display: 'flex', flexDirection: 'column', flex: 1 } }}
     >
       {/* Header */}
@@ -151,7 +152,7 @@ const PositionCard = ({ position, applicationData }) => {
         <Text style={{ fontSize: 20, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 1 }}>
           {position.seniority}
         </Text>
-        <Title level={4} style={{ margin: '4px 0 0', color: '#1677ff', lineHeight: 1.2 }}>
+        <Title level={4} style={{ margin: '4px 0 0', color: '#4F46E5', lineHeight: 1.2 }}>
           {position.title}
         </Title>
       </div>
@@ -210,7 +211,7 @@ const PositionCard = ({ position, applicationData }) => {
                     {applicationData.aiAssessment && (
                       <Tooltip title="View AI Analysis">
                         <InfoCircleOutlined
-                          style={{ color: '#1677ff', cursor: 'pointer' }}
+                          style={{ color: '#4F46E5', cursor: 'pointer' }}
                           onClick={() => setIsAnalysisModalOpen(true)}
                         />
                       </Tooltip>

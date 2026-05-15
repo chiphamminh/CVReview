@@ -1,32 +1,33 @@
 import React from 'react';
-import { Tag } from 'antd';
 
-const STAGE_COLORS = {
-  'APPLIED': 'blue',
-  'INTERVIEW_SCHEDULED': 'orange',
-  'INTERVIEWED': 'cyan',
-  'OFFER': 'gold',
-  'ACCEPTED': 'green',
-  'REJECTED': 'red',
-};
-
-const STAGE_LABELS = {
-  'APPLIED': 'Applied',
-  'INTERVIEW_SCHEDULED': 'Interview Scheduled',
-  'INTERVIEWED': 'Interviewed',
-  'OFFER': 'Offer',
-  'ACCEPTED': 'Accepted',
-  'REJECTED': 'Rejected',
+const STAGE_CONFIG = {
+  APPLIED:             { bg: '#EEF2FF', color: '#4338CA', label: 'Applied' },
+  INTERVIEW_SCHEDULED: { bg: '#FFF7ED', color: '#C2410C', label: 'Interview Scheduled' },
+  INTERVIEWED:         { bg: '#F3E8FF', color: '#7C3AED', label: 'Interviewed' },
+  OFFER:               { bg: '#CFFAFE', color: '#0E7490', label: 'Offer' },
+  ACCEPTED:            { bg: '#DCFCE7', color: '#16A34A', label: 'Accepted' },
+  REJECTED:            { bg: '#FEE2E2', color: '#DC2626', label: 'Rejected' },
 };
 
 const StageTag = ({ stage }) => {
-  const color = STAGE_COLORS[stage] || 'default';
-  const label = STAGE_LABELS[stage] || stage;
+  const cfg = STAGE_CONFIG[stage];
+  if (!cfg) return <span style={{ color: '#94A3B8', fontSize: 12 }}>{stage || '—'}</span>;
 
   return (
-    <Tag color={color} style={{ fontWeight: 500 }}>
-      {label}
-    </Tag>
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      padding: '3px 10px',
+      borderRadius: 20,
+      fontSize: 12,
+      fontWeight: 600,
+      background: cfg.bg,
+      color: cfg.color,
+      whiteSpace: 'nowrap',
+      letterSpacing: '0.01em',
+    }}>
+      {cfg.label}
+    </span>
   );
 };
 
