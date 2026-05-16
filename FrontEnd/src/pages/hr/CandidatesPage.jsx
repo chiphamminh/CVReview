@@ -298,6 +298,45 @@ const CandidatesPage = () => {
     },
   ];
 
+  const cvDetailColumns = [
+    {
+      title: 'File Name',
+      dataIndex: 'fileName',
+      key: 'fileName',
+      render: (name) => name
+        ? <Text strong style={{ fontSize: 13 }}>{name}</Text>
+        : <Text type="secondary" style={{ fontSize: 13 }}>Unknown file</Text>,
+    },
+    {
+      title: 'Candidate',
+      key: 'candidate',
+      render: (_, record) => (
+        record.name || record.email
+          ? <div>
+              {record.name && <div style={{ fontWeight: 500, fontSize: 13 }}>{record.name}</div>}
+              {record.email && <Text type="secondary" style={{ fontSize: 12 }}>{record.email}</Text>}
+            </div>
+          : <Text type="secondary" style={{ fontSize: 13 }}>-</Text>
+      ),
+    },
+    {
+      title: 'Error',
+      dataIndex: 'errorMessage',
+      key: 'errorMessage',
+      render: (msg) => msg
+        ? <Paragraph ellipsis={{ rows: 2, tooltip: msg }} style={{ margin: 0, fontSize: 12, color: '#cf1322' }}>{msg}</Paragraph>
+        : <Text type="secondary">-</Text>,
+    },
+    {
+      title: 'View File',
+      key: 'view',
+      width: 80,
+      render: (_, record) => record.driveFileUrl
+        ? <Tooltip title="Open original file"><Button type="link" size="small" icon={<EyeOutlined />} onClick={() => window.open(record.driveFileUrl, '_blank')} /></Tooltip>
+        : <Text type="secondary">-</Text>,
+    },
+  ];
+
   const failedColumns = [
     {
       title: '',
@@ -317,16 +356,6 @@ const CandidatesPage = () => {
       ),
     },
     {
-      title: 'Batch ID',
-      dataIndex: 'batchId',
-      key: 'batchId',
-      render: (id) => (
-        <Tooltip title={id}>
-          <Text code style={{ fontSize: 16 }}>{id?.length > 24 ? id.substring(0, 24) + '…' : id}</Text>
-        </Tooltip>
-      ),
-    },
-    {
       title: 'Position',
       dataIndex: 'positionTitle',
       key: 'positionTitle',
@@ -337,7 +366,7 @@ const CandidatesPage = () => {
       dataIndex: 'failedCount',
       key: 'failedCount',
       width: 100,
-      render: (count) => <Tag color="red">{count} file{count !== 1 ? 's' : ''}</Tag>,
+      render: (count) => <Tag color="red" style={{ fontSize: 14 }}>{count} file{count !== 1 ? 's' : ''}</Tag>,
     },
     {
       title: 'Uploaded At',
@@ -495,9 +524,7 @@ const CandidatesPage = () => {
           <Button icon={<FilterOutlined />} onClick={handleClearAllFilters} danger type="dashed">
             Clear All
           </Button>
-          <Button icon={<ReloadOutlined />} onClick={() => refetchCandidates()} loading={isCandFetching} style={{ marginLeft: 'auto' }}>
-            Refresh
-          </Button>
+          <Button icon={<ReloadOutlined />} onClick={() => refetchCandidates()} loading={isCandFetching} style={{ marginLeft: 'auto' }}></Button>
         </div>
       )}
 
@@ -555,6 +582,19 @@ const CandidatesPage = () => {
           rowKey="batchId"
           loading={isFailedLoading || deleteFailedMutation.isPending}
           pagination={false}
+          expandable={{
+            expandedRowRender: (record) => (
+              <AppTable
+                columns={cvDetailColumns}
+                dataSource={record.cvs ?? []}
+                rowKey="cvId"
+                size="small"
+                pagination={false}
+                style={{ margin: '0 40px' }}
+              />
+            ),
+            rowExpandable: (record) => record.cvs?.length > 0,
+          }}
         />
       )}
 

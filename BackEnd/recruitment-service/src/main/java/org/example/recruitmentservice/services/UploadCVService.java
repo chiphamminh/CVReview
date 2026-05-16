@@ -191,6 +191,7 @@ public class UploadCVService {
             cv.setDriveFileId(driveFileInfo.getFileId());
             cv.setDriveFileUrl(driveFileInfo.getWebViewLink());
 
+            cv.setFileName(file.getOriginalFilename());
             cv.setCvStatus(CVStatus.PENDING);
             cv.setAppliedDate(LocalDateTime.now());
             cv.setCreatedAt(LocalDateTime.now());

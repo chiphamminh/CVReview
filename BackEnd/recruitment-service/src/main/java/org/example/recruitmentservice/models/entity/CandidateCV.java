@@ -79,6 +79,9 @@ public class CandidateCV {
     private String batchId;
 
     @Column
+    private String fileName;
+
+    @Column
     private LocalDateTime appliedDate;
 
     @Column

@@ -325,17 +325,17 @@ const HRChatbotPage = () => {
             gap: 8,
             overflow: 'hidden',
           }}>
+            {!sidebarCollapsed && (
+              <Button type="primary" icon={<PlusOutlined />} block onClick={handleNewChatClick}>
+                New Chat
+              </Button>
+            )}
             <Button
               type="text"
               icon={sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
               style={{ flexShrink: 0 }}
             />
-            {!sidebarCollapsed && (
-              <Button type="primary" icon={<PlusOutlined />} block onClick={handleNewChatClick}>
-                New Chat
-              </Button>
-            )}
           </div>
 
           {/* Session list — hidden when collapsed */}
@@ -467,15 +467,15 @@ const HRChatbotPage = () => {
                   {streamingContent
                     ? <ChatMarkdown>{streamingContent}</ChatMarkdown>
                     : <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div className="typing-indicator">
-                          <div className="typing-dot" />
-                          <div className="typing-dot" />
-                          <div className="typing-dot" />
-                        </div>
-                        {statusMessage && (
-                          <span style={{ color: '#94A3B8', fontSize: 13 }}>{statusMessage}</span>
-                        )}
+                      <div className="typing-indicator">
+                        <div className="typing-dot" />
+                        <div className="typing-dot" />
+                        <div className="typing-dot" />
                       </div>
+                      {statusMessage && (
+                        <span style={{ color: '#94A3B8', fontSize: 13 }}>{statusMessage}</span>
+                      )}
+                    </div>
                   }
                 </div>
               </div>

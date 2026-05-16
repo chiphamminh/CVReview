@@ -422,6 +422,17 @@ public class CandidateCVService {
                             .findFirst()
                             .orElse(null);
 
+                    List<org.example.recruitmentservice.dto.response.FailedBatchSummary.FailedCVItem> cvItems = batch.stream()
+                            .map(cv -> org.example.recruitmentservice.dto.response.FailedBatchSummary.FailedCVItem.builder()
+                                    .cvId(cv.getId())
+                                    .fileName(cv.getFileName())
+                                    .name(cv.getName())
+                                    .email(cv.getEmail())
+                                    .driveFileUrl(cv.getDriveFileUrl())
+                                    .errorMessage(cv.getErrorMessage())
+                                    .build())
+                            .collect(Collectors.toList());
+
                     return org.example.recruitmentservice.dto.response.FailedBatchSummary.builder()
                             .batchId(entry.getKey())
                             .positionId(position != null ? position.getId() : null)
@@ -432,6 +443,7 @@ public class CandidateCVService {
                             .uploadedAt(uploadedAt)
                             .failedAt(failedAt)
                             .errorMessage(errorMessage)
+                            .cvs(cvItems)
                             .build();
                 })
                 .sorted(Comparator.comparing(
