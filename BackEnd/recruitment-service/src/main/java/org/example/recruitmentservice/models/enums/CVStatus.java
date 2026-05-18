@@ -4,6 +4,7 @@ public enum CVStatus {
     PENDING,
     EXTRACTING,
     EXTRACTED,
+    CHUNKING,
     EMBEDDING,
     EMBEDDED,
     FAILED

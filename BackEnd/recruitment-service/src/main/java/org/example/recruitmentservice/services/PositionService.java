@@ -124,12 +124,10 @@ public class PositionService {
 
                 p = positionRepository.findById(positionSaved.getId());
                 if (p != null) {
-                    p.setStatus(JDStatus.EMBEDDING);
                     p.setJobDescription(jdText);
                     p.setUpdatedAt(LocalDateTime.now());
                     positionRepository.save(p);
 
-                    // Chunk & Publish
                     List<JDChunkPayload> chunks = jdChunkingService.chunk(
                             p.getId(), p.getTitle(),
                             p.getSeniority(), jdText);
@@ -140,6 +138,9 @@ public class PositionService {
                         positionRepository.save(p);
                         processingBatchService.incrementProcessed(batchId, false);
                     } else {
+                        p.setStatus(JDStatus.EMBEDDING);
+                        p.setUpdatedAt(LocalDateTime.now());
+                        positionRepository.save(p);
                         publishJDChunkedEvent(p, chunks);
                     }
                 }

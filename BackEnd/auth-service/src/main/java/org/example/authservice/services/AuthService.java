@@ -1,11 +1,11 @@
 package org.example.authservice.services;
 
-import org.example.authservice.dto.request.LoginRequest;
+import org.example.authservice.dto.request.*;
 import org.example.authservice.dto.response.LoginData;
-import org.example.authservice.dto.request.LogoutRequest;
-import org.example.authservice.dto.request.RegisterHrRequest;
 import org.example.authservice.dto.response.LogoutData;
 import org.example.authservice.dto.response.Userdata;
+import org.example.authservice.dto.response.VerifyResetOtpResponse;
+import org.example.authservice.models.OtpPurpose;
 import org.example.authservice.models.RefreshToken;
 import org.example.authservice.models.Role;
 import org.example.authservice.models.Users;
@@ -13,6 +13,7 @@ import org.example.authservice.repository.UserRepository;
 import org.example.authservice.security.JwtUtil;
 import org.example.commonlibrary.dto.response.ApiResponse;
 import org.example.commonlibrary.dto.response.ErrorCode;
+import org.example.commonlibrary.exception.CustomException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -36,6 +37,9 @@ public class AuthService {
 
     @Autowired
     private RefreshTokenService refreshTokenService;
+
+    @Autowired
+    private OtpService otpService;
 
     public ApiResponse<LoginData> login(LoginRequest loginRequest) {
         try {
@@ -168,6 +172,169 @@ public class AuthService {
             e.printStackTrace();
             return new ApiResponse<>(ErrorCode.USER_NOT_FOUND.getCode(),
                     "User not found", null);
+        }
+    }
+
+    // ─── Candidate auth ───────────────────────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<Void> candidateRegister(CandidateRegisterRequest request) {
+        if (request.getEmail() == null || request.getEmail().isBlank())
+            return new ApiResponse<>(ErrorCode.MISSING_REQUIRED_FIELD.getCode(), "Email is required", null);
+        if (request.getName() == null || request.getName().isBlank())
+            return new ApiResponse<>(ErrorCode.MISSING_REQUIRED_FIELD.getCode(), "Name is required", null);
+        if (request.getPassword() == null || request.getPassword().isBlank())
+            return new ApiResponse<>(ErrorCode.MISSING_REQUIRED_FIELD.getCode(), "Password is required", null);
+
+        String email = request.getEmail().toLowerCase().trim();
+
+        if (userRepository.findByEmail(email) != null)
+            return new ApiResponse<>(ErrorCode.DUPLICATE_EMAIL.getCode(),
+                    ErrorCode.DUPLICATE_EMAIL.getMessage(), null);
+
+        otpService.generateAndSend(email, OtpPurpose.REGISTRATION);
+        return new ApiResponse<>(ErrorCode.SUCCESS.getCode(),
+                "OTP sent to " + email + ". Please verify to complete registration.", null);
+    }
+
+    @Transactional
+    public ApiResponse<Void> verifyRegistration(VerifyRegisterRequest request) {
+        if (request.getEmail() == null || request.getEmail().isBlank())
+            return new ApiResponse<>(ErrorCode.MISSING_REQUIRED_FIELD.getCode(), "Email is required", null);
+        if (request.getOtp() == null || request.getOtp().isBlank())
+            return new ApiResponse<>(ErrorCode.MISSING_REQUIRED_FIELD.getCode(), "OTP is required", null);
+        if (request.getName() == null || request.getName().isBlank())
+            return new ApiResponse<>(ErrorCode.MISSING_REQUIRED_FIELD.getCode(), "Name is required", null);
+        if (request.getPassword() == null || request.getPassword().isBlank())
+            return new ApiResponse<>(ErrorCode.MISSING_REQUIRED_FIELD.getCode(), "Password is required", null);
+
+        String email = request.getEmail().toLowerCase().trim();
+
+        // Re-check duplicate in case of race condition between OTP send and verify
+        if (userRepository.findByEmail(email) != null)
+            return new ApiResponse<>(ErrorCode.DUPLICATE_EMAIL.getCode(),
+                    ErrorCode.DUPLICATE_EMAIL.getMessage(), null);
+
+        try {
+            otpService.verifyOtp(email, request.getOtp(), OtpPurpose.REGISTRATION);
+        } catch (CustomException e) {
+            return new ApiResponse<>(e.getErrorCode().getCode(), e.getMessage(), null);
+        }
+
+        Users candidate = Users.builder()
+                .name(request.getName().trim())
+                .email(email)
+                .password(passwordEncoder.encode(request.getPassword()))
+                .role(Role.CANDIDATE)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        userRepository.save(candidate);
+
+        return new ApiResponse<>(ErrorCode.SUCCESS.getCode(),
+                "Registration successful. Please log in.", null);
+    }
+
+    public ApiResponse<LoginData> candidateLogin(CandidateLoginRequest request) {
+        if (request.getEmail() == null || request.getEmail().isBlank())
+            return new ApiResponse<>(ErrorCode.MISSING_REQUIRED_FIELD.getCode(), "Email is required", null);
+        if (request.getPassword() == null || request.getPassword().isBlank())
+            return new ApiResponse<>(ErrorCode.MISSING_REQUIRED_FIELD.getCode(), "Password is required", null);
+
+        try {
+            String email = request.getEmail().toLowerCase().trim();
+            Users user = userRepository.findByEmail(email);
+            if (user == null)
+                return new ApiResponse<>(ErrorCode.USER_NOT_FOUND.getCode(),
+                        ErrorCode.USER_NOT_FOUND.getMessage(), null);
+
+            if (user.getRole() != Role.CANDIDATE)
+                return new ApiResponse<>(ErrorCode.FORBIDDEN.getCode(),
+                        "This login is for candidates only", null);
+
+            if (!isPasswordValid(user, request.getPassword()))
+                return new ApiResponse<>(ErrorCode.INVALID_CREDENTIALS.getCode(),
+                        ErrorCode.INVALID_CREDENTIALS.getMessage(), null);
+
+            if (needsPasswordUpgrade(user))
+                upgradePasswordAsync(user, request.getPassword());
+
+            String accessToken = jwtUtil.generateCandidateAccessToken(user.getId(), user.getEmail(), user.getRole());
+            RefreshToken refreshToken = refreshTokenService.createRefreshToken(user);
+
+            LoginData.AccountInfo accountInfo = new LoginData.AccountInfo(
+                    user.getId(), user.getEmail(), user.getName(),
+                    user.getPhone(), user.getRole(), user.getCreatedAt());
+
+            return new ApiResponse<>(ErrorCode.SUCCESS.getCode(),
+                    "Welcome to CV Review System", new LoginData(accessToken, refreshToken.getToken(), accountInfo));
+
+        } catch (Exception e) {
+            return new ApiResponse<>(ErrorCode.UNAUTHORIZED.getCode(),
+                    "Login failed: " + e.getMessage(), null);
+        }
+    }
+
+    public ApiResponse<Void> forgotPassword(ForgotPasswordRequest request) {
+        if (request.getEmail() == null || request.getEmail().isBlank())
+            return new ApiResponse<>(ErrorCode.MISSING_REQUIRED_FIELD.getCode(), "Email is required", null);
+
+        String email = request.getEmail().toLowerCase().trim();
+        Users user = userRepository.findByEmail(email);
+
+        // Always return success to prevent email enumeration
+        if (user == null || user.getRole() != Role.CANDIDATE)
+            return new ApiResponse<>(ErrorCode.SUCCESS.getCode(),
+                    "If this email is registered, an OTP will be sent.", null);
+
+        otpService.generateAndSend(email, OtpPurpose.RESET_PASSWORD);
+        return new ApiResponse<>(ErrorCode.SUCCESS.getCode(),
+                "If this email is registered, an OTP will be sent.", null);
+    }
+
+    public ApiResponse<VerifyResetOtpResponse> verifyResetOtp(VerifyOtpRequest request) {
+        if (request.getEmail() == null || request.getEmail().isBlank())
+            return new ApiResponse<>(ErrorCode.MISSING_REQUIRED_FIELD.getCode(), "Email is required", null);
+        if (request.getOtp() == null || request.getOtp().isBlank())
+            return new ApiResponse<>(ErrorCode.MISSING_REQUIRED_FIELD.getCode(), "OTP is required", null);
+
+        try {
+            String resetToken = otpService.verifyOtp(
+                    request.getEmail().toLowerCase().trim(),
+                    request.getOtp(),
+                    OtpPurpose.RESET_PASSWORD);
+            return new ApiResponse<>(ErrorCode.SUCCESS.getCode(),
+                    "OTP verified", new VerifyResetOtpResponse(resetToken));
+        } catch (CustomException e) {
+            return new ApiResponse<>(e.getErrorCode().getCode(), e.getMessage(), null);
+        }
+    }
+
+    @Transactional
+    public ApiResponse<Void> resetPassword(ResetPasswordRequest request) {
+        if (request.getResetToken() == null || request.getResetToken().isBlank())
+            return new ApiResponse<>(ErrorCode.MISSING_REQUIRED_FIELD.getCode(), "Reset token is required", null);
+        if (request.getNewPassword() == null || request.getNewPassword().isBlank())
+            return new ApiResponse<>(ErrorCode.MISSING_REQUIRED_FIELD.getCode(), "New password is required", null);
+
+        try {
+            String email = otpService.consumeResetToken(request.getResetToken());
+            Users user = userRepository.findByEmail(email);
+            if (user == null)
+                return new ApiResponse<>(ErrorCode.USER_NOT_FOUND.getCode(),
+                        ErrorCode.USER_NOT_FOUND.getMessage(), null);
+
+            user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+            user.setUpdatedAt(LocalDateTime.now());
+            userRepository.save(user);
+
+            // Invalidate all sessions after password reset
+            refreshTokenService.deleteAllByUser(user);
+
+            return new ApiResponse<>(ErrorCode.SUCCESS.getCode(),
+                    "Password reset successful. Please log in with your new password.", null);
+        } catch (CustomException e) {
+            return new ApiResponse<>(e.getErrorCode().getCode(), e.getMessage(), null);
         }
     }
 

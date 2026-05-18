@@ -55,23 +55,30 @@ public class JwtUtil {
 
             // Check required claims
             String id = claims.get("Id", String.class);
-            String phone = claims.get("Phone", String.class);
             String role = claims.get("Role", String.class);
+            String phone = claims.get("Phone", String.class);
+            String email = claims.get("Email", String.class);
 
             if (id == null || id.isEmpty()) {
                 System.out.println("Missing Id claim");
                 return TokenValidationResult.invalid("MISSING_CLAIM_ID", "Token is missing required claim: Id");
             }
-            if (phone == null || phone.isEmpty()) {
-                System.out.println("Missing Phone claim");
-                return TokenValidationResult.invalid("MISSING_CLAIM_PHONE", "Token is missing required claim: Phone");
-            }
             if (role == null || role.isEmpty()) {
                 System.out.println("Missing Role claim");
                 return TokenValidationResult.invalid("MISSING_CLAIM_ROLE", "Token is missing required claim: Role");
             }
+            // CANDIDATE tokens use Email claim; HR/ADMIN tokens use Phone claim
+            boolean isCandidate = "CANDIDATE".equalsIgnoreCase(role);
+            if (!isCandidate && (phone == null || phone.isEmpty())) {
+                System.out.println("Missing Phone claim for non-candidate role");
+                return TokenValidationResult.invalid("MISSING_CLAIM_PHONE", "Token is missing required claim: Phone");
+            }
+            if (isCandidate && (email == null || email.isEmpty())) {
+                System.out.println("Missing Email claim for CANDIDATE role");
+                return TokenValidationResult.invalid("MISSING_CLAIM_EMAIL", "Token is missing required claim: Email");
+            }
 
-            System.out.println("Token validated successfully for user: " + phone);
+            System.out.println("Token validated successfully for user: " + (isCandidate ? email : phone));
             return TokenValidationResult.valid();
 
         } catch (ExpiredJwtException e) {
@@ -122,6 +129,18 @@ public class JwtUtil {
             return claims.get("Phone", String.class);
         } catch (Exception e) {
             throw new JwtException("Failed to extract Phone from token: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Extract email from valid token (CANDIDATE role)
+     */
+    public String extractEmail(String token) {
+        try {
+            Claims claims = extractAllClaims(token);
+            return claims.get("Email", String.class);
+        } catch (Exception e) {
+            throw new JwtException("Failed to extract Email from token: " + e.getMessage());
         }
     }
 

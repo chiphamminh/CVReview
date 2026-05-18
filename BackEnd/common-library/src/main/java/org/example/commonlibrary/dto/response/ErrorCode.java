@@ -27,6 +27,11 @@ public enum ErrorCode {
     TOKEN_EXPIRED(1015, "Token has expired. Please refresh your token or login again", HttpStatus.UNAUTHORIZED),
     TOKEN_MISSING(1016, "Authorization token is required", HttpStatus.UNAUTHORIZED),
     DUPLICATE_PHONE(1017, "Phone number already exists", HttpStatus.CONFLICT),
+    DUPLICATE_EMAIL(1018, "Email already exists", HttpStatus.CONFLICT),
+    OTP_INVALID(1019, "OTP is incorrect", HttpStatus.BAD_REQUEST),
+    OTP_EXPIRED(1020, "OTP has expired", HttpStatus.BAD_REQUEST),
+    OTP_MAX_ATTEMPTS(1021, "Too many failed OTP attempts", HttpStatus.TOO_MANY_REQUESTS),
+    RESET_TOKEN_INVALID(1022, "Password reset token is invalid or expired", HttpStatus.BAD_REQUEST),
 
     // CV errors
     CV_NOT_FOUND(2001, "CV not found", HttpStatus.NOT_FOUND),

@@ -1,13 +1,9 @@
 package org.example.authservice.controller;
 
-import org.example.authservice.dto.request.LoginRequest;
-import org.example.authservice.dto.request.LogoutRequest;
-import org.example.authservice.dto.request.RefreshTokenRequest;
-import org.example.authservice.dto.response.LoginData;
-import org.example.authservice.dto.response.LogoutData;
-import org.example.authservice.dto.response.RefreshTokenResponse;
-import org.example.authservice.dto.response.Userdata;
+import org.example.authservice.dto.request.*;
+import org.example.authservice.dto.response.*;
 import org.example.authservice.models.RefreshToken;
+import org.example.authservice.models.Role;
 import org.example.authservice.models.Users;
 import org.example.authservice.security.JwtUtil;
 import org.example.authservice.services.AuthService;
@@ -55,21 +51,17 @@ public class AuthController {
             refreshTokenService.verifyExpiration(refreshToken);
 
             Users user = refreshToken.getUser();
-            String newAccessToken = jwtUtil.generateAccessToken(
-                    user.getId(), user.getPhone(), user.getRole());
+            String newAccessToken = user.getRole() == Role.CANDIDATE
+                    ? jwtUtil.generateCandidateAccessToken(user.getId(), user.getEmail(), user.getRole())
+                    : jwtUtil.generateAccessToken(user.getId(), user.getPhone(), user.getRole());
 
             RefreshTokenResponse responseData = new RefreshTokenResponse(
                     refreshToken.getToken(), newAccessToken);
 
-            ApiResponse<RefreshTokenResponse> apiResponse = new ApiResponse<>(
-                    ErrorCode.SUCCESS.getCode(),
-                    ErrorCode.SUCCESS.getMessage(),
-                    responseData);
-
-            return ResponseEntity.ok(apiResponse);
+            return ResponseEntity.ok(new ApiResponse<>(
+                    ErrorCode.SUCCESS.getCode(), ErrorCode.SUCCESS.getMessage(), responseData));
 
         } catch (RuntimeException e) {
-            // Phân loại lỗi cụ thể
             ErrorCode errorCode;
             if (e.getMessage().contains("expired")) {
                 errorCode = ErrorCode.REFRESH_TOKEN_EXPIRED;
@@ -78,14 +70,41 @@ public class AuthController {
             } else {
                 errorCode = ErrorCode.REFRESH_TOKEN_INVALID;
             }
-
-            ApiResponse<RefreshTokenResponse> errorResponse = new ApiResponse<>(
-                    errorCode.getCode(),
-                    errorCode.getMessage(),
-                    null);
-
-            return ResponseEntity.status(errorCode.getHttpStatus()).body(errorResponse);
+            return ResponseEntity.status(errorCode.getHttpStatus())
+                    .body(new ApiResponse<>(errorCode.getCode(), errorCode.getMessage(), null));
         }
+    }
+
+    // ─── Candidate auth endpoints ──────────────────────────────────────────────
+
+    @PostMapping("/candidate/register")
+    public ApiResponse<Void> candidateRegister(@RequestBody CandidateRegisterRequest request) {
+        return authService.candidateRegister(request);
+    }
+
+    @PostMapping("/candidate/verify-register")
+    public ApiResponse<Void> verifyRegister(@RequestBody VerifyRegisterRequest request) {
+        return authService.verifyRegistration(request);
+    }
+
+    @PostMapping("/candidate/login")
+    public ApiResponse<LoginData> candidateLogin(@RequestBody CandidateLoginRequest request) {
+        return authService.candidateLogin(request);
+    }
+
+    @PostMapping("/candidate/forgot-password")
+    public ApiResponse<Void> forgotPassword(@RequestBody ForgotPasswordRequest request) {
+        return authService.forgotPassword(request);
+    }
+
+    @PostMapping("/candidate/verify-reset-otp")
+    public ApiResponse<VerifyResetOtpResponse> verifyResetOtp(@RequestBody VerifyOtpRequest request) {
+        return authService.verifyResetOtp(request);
+    }
+
+    @PostMapping("/candidate/reset-password")
+    public ApiResponse<Void> resetPassword(@RequestBody ResetPasswordRequest request) {
+        return authService.resetPassword(request);
     }
 
     @GetMapping("/user-detail")

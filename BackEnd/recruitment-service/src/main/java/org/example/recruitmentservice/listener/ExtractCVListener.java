@@ -53,7 +53,7 @@ public class ExtractCVListener {
         }
 
         try {
-            cv.setCvStatus(CVStatus.EMBEDDING);
+            cv.setCvStatus(CVStatus.CHUNKING);
             cv.setUpdatedAt(LocalDateTime.now());
             candidateCVRepository.save(cv);
 
@@ -62,6 +62,10 @@ public class ExtractCVListener {
                 markAsFailed(cv, "Chunking service returned empty chunks.");
                 throw new RuntimeException("Chunking failed for cvId=" + cvId);
             }
+
+            cv.setCvStatus(CVStatus.EMBEDDING);
+            cv.setUpdatedAt(LocalDateTime.now());
+            candidateCVRepository.save(cv);
 
             int totalTokens = chunks.stream().mapToInt(ChunkPayload::getTokensEstimate).sum();
             // Master CV (candidate upload) has no position — use empty string as title

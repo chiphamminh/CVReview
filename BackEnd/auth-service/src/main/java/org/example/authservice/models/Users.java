@@ -28,7 +28,7 @@ public class Users {
     @Column(nullable = false)
     private String email;
 
-    @Column(nullable = false)
+    @Column
     private String phone;
 
     @Column(nullable = false)

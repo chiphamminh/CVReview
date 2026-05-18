@@ -38,10 +38,13 @@ public class RefreshTokenService {
         Instant now = Instant.now();
 
         // 1. Chỉ INSERT — không đọc (Read) trước để tránh Read-Modify-Write race condition
+        String rawRefreshToken = user.getRole() == org.example.authservice.models.Role.CANDIDATE
+                ? jwtUtil.generateCandidateRefreshToken(user.getId(), user.getEmail(), user.getRole())
+                : jwtUtil.generateRefreshToken(user.getId(), user.getPhone(), user.getRole());
+
         RefreshToken refreshToken = RefreshToken.builder()
                 .user(user)
-                .token(jwtUtil.generateRefreshToken(
-                        user.getId(), user.getPhone(), user.getRole()))
+                .token(rawRefreshToken)
                 .expiresAt(now.plusMillis(refreshDuration))
                 .build();
 

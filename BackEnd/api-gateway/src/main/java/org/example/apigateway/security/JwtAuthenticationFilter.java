@@ -81,11 +81,14 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
             }
 
             // Extract claims và thêm vào headers
-            String phone = jwtUtil.extractPhone(token);
             String role = jwtUtil.extractRole(token);
             String id = jwtUtil.extractId(token);
+            boolean isCandidate = "CANDIDATE".equalsIgnoreCase(role);
+            String phone = isCandidate ? null : jwtUtil.extractPhone(token);
+            String email = isCandidate ? jwtUtil.extractEmail(token) : null;
 
-            System.out.println("JWT valid - Id: " + id + ", Phone: " + phone + ", Role: " + role);
+            System.out.println("JWT valid - Id: " + id + ", Role: " + role
+                    + (isCandidate ? ", Email: " + email : ", Phone: " + phone));
 
             // Kiểm tra phân quyền theo prefix route
             if (path.startsWith("/admin") || path.startsWith("/api/admin") || path.startsWith("/auth/admin")) {
@@ -104,11 +107,12 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
             System.out.println("Forwarding to downstream: " + uri);
 
-            ServerHttpRequest modifiedRequest = exchange.getRequest().mutate()
-                    .header("X-User-Phone", phone)
+            ServerHttpRequest.Builder requestBuilder = exchange.getRequest().mutate()
                     .header("X-User-Role", role)
-                    .header("X-User-Id", id)
-                    .build();
+                    .header("X-User-Id", id);
+            if (phone != null) requestBuilder.header("X-User-Phone", phone);
+            if (email != null) requestBuilder.header("X-User-Email", email);
+            ServerHttpRequest modifiedRequest = requestBuilder.build();
 
             return chain.filter(exchange.mutate().request(modifiedRequest).build())
                     .doOnSuccess(aVoid -> System.out.println("Successfully forwarded to: " + uri))
@@ -132,6 +136,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                 return ErrorCode.TOKEN_INVALID;
             case "MISSING_CLAIM_ID":
             case "MISSING_CLAIM_PHONE":
+            case "MISSING_CLAIM_EMAIL":
             case "MISSING_CLAIM_ROLE":
             case "MISSING_EXPIRATION":
                 return ErrorCode.INVALID_REQUEST;
