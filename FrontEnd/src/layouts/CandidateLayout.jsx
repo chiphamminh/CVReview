@@ -4,6 +4,7 @@ import { UserOutlined, RobotOutlined, FileTextOutlined, LogoutOutlined } from '@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '@/store/authStore';
 import useUiStore from '@/store/uiStore';
+import { authApi } from '@/api/auth.api';
 import CandidateChatbotDrawer from '@/components/chatbot/CandidateChatbotDrawer';
 
 const { Header, Content, Footer } = Layout;
@@ -13,11 +14,17 @@ const CandidateLayout = ({ children }) => {
   const { chatbotOpen, openChatbot, closeChatbot } = useUiStore();
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const { user, logout } = useAuthStore();
+  const { user, logout, refreshToken } = useAuthStore();
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
+  const handleLogout = async () => {
+    try {
+      await authApi.logout(refreshToken);
+    } catch {
+      // best-effort: always clear local state even if API fails
+    } finally {
+      logout();
+      navigate('/login');
+    }
   };
 
   const userMenu = {

@@ -12,6 +12,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import useAuthStore from '@/store/authStore';
+import { authApi } from '@/api/auth.api';
 
 const { Header, Sider, Content } = Layout;
 
@@ -20,11 +21,17 @@ const HRLayout = ({ children }) => {
   const { token: { borderRadiusLG } } = theme.useToken();
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout } = useAuthStore();
+  const { user, logout, refreshToken } = useAuthStore();
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
+  const handleLogout = async () => {
+    try {
+      await authApi.logout(refreshToken);
+    } catch {
+      // best-effort: always clear local state even if API fails
+    } finally {
+      logout();
+      navigate('/login');
+    }
   };
 
   const menuItems = [
@@ -126,8 +133,8 @@ const HRLayout = ({ children }) => {
           <div>
             <Dropdown menu={userMenu} placement="bottomRight" align={{ offset: [0, -8] }}>
               <div style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: 8 }}>
-                <span style={{ fontWeight: 500 }}>{user?.name || 'HR Admin'}</span>
                 <Avatar icon={<UserOutlined />} style={{ backgroundColor: '#4F46E5' }} />
+                <span style={{ fontWeight: 500 }}> {user?.name || 'HR Admin'}</span>
               </div>
             </Dropdown>
           </div>

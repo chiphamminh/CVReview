@@ -1,7 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Form, Input, Button, Tabs, Typography, Divider, App, Card } from 'antd';
 import {
-  PhoneOutlined,
   LockOutlined,
   UserOutlined,
   MailOutlined,
@@ -9,8 +8,10 @@ import {
   GoogleOutlined,
   GithubOutlined,
   FacebookFilled,
+  ArrowLeftOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import useAuthStore from '@/store/authStore';
 import { authApi } from '@/api/auth.api';
 
@@ -19,21 +20,9 @@ const { Title, Text } = Typography;
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const SOCIAL_PROVIDERS = [
-  {
-    key: 'google',
-    label: 'Google',
-    icon: <GoogleOutlined style={{ color: '#ea4335' }} />,
-  },
-  {
-    key: 'github',
-    label: 'GitHub',
-    icon: <GithubOutlined style={{ color: '#24292e' }} />,
-  },
-  {
-    key: 'facebook',
-    label: 'Facebook',
-    icon: <FacebookFilled style={{ color: '#1877f2' }} />,
-  },
+  { key: 'google', label: 'Google', icon: <GoogleOutlined style={{ color: '#ea4335' }} /> },
+  { key: 'github', label: 'GitHub', icon: <GithubOutlined style={{ color: '#24292e' }} /> },
+  { key: 'facebook', label: 'Facebook', icon: <FacebookFilled style={{ color: '#1877f2' }} /> },
 ];
 
 // ─── Social Login Section ─────────────────────────────────────────────────────
@@ -44,7 +33,6 @@ const SocialSection = ({ dividerText }) => {
   const handleSocialLogin = useCallback(
     (providerKey) => {
       if (providerKey === 'google') {
-        // TODO: redirect to OAuth2 Google endpoint
         message.info('Google login is coming soon.');
       } else {
         message.info(`${providerKey.charAt(0).toUpperCase() + providerKey.slice(1)} login is not available yet.`);
@@ -87,11 +75,21 @@ const LoginForm = ({ onSuccess }) => {
     async (values) => {
       setLoading(true);
       try {
-        const res = await authApi.login(values.phone, values.password);
+        const identifier = values.identifier?.trim();
+        const isEmail = identifier.includes('@');
+
+        let res;
+        if (isEmail) {
+          res = await authApi.candidateLogin(identifier, values.password);
+        } else {
+          res = await authApi.login(identifier, values.password);
+        }
+
         if (!res?.data) {
-          message.error(res?.message || 'Invalid phone number or password.');
+          message.error(res?.message || 'Invalid credentials.');
           return;
         }
+
         const { accessToken, refreshToken, account } = res.data;
         login(account, accessToken, refreshToken);
         message.success(`Welcome back, ${account.name}!`);
@@ -111,16 +109,13 @@ const LoginForm = ({ onSuccess }) => {
     <>
       <Form form={form} layout="vertical" onFinish={handleSubmit} size="large" style={{ marginTop: 4 }}>
         <Form.Item
-          name="phone"
-          label="Phone Number"
-          rules={[
-            { required: true, message: 'Please enter your phone number' },
-            { pattern: /^[0-9]{9,11}$/, message: 'Invalid phone number format' },
-          ]}
+          name="identifier"
+          label="Phone or Email"
+          rules={[{ required: true, message: 'Please enter your phone number or email' }]}
         >
           <Input
-            prefix={<PhoneOutlined style={{ color: '#bfbfbf' }} />}
-            placeholder="0912 345 678"
+            prefix={<MailOutlined style={{ color: '#bfbfbf' }} />}
+            placeholder="0912345678 or you@example.com"
           />
         </Form.Item>
 
@@ -128,12 +123,19 @@ const LoginForm = ({ onSuccess }) => {
           name="password"
           label="Password"
           rules={[{ required: true, message: 'Please enter your password' }]}
+          style={{ marginBottom: 4 }}
         >
           <Input.Password
             prefix={<LockOutlined style={{ color: '#bfbfbf' }} />}
             placeholder="••••••••"
           />
         </Form.Item>
+
+        <div style={{ textAlign: 'right', marginBottom: 16 }}>
+          <Link to="/forgot-password" style={{ fontSize: 13, color: '#4F46E5' }}>
+            Forgot password?
+          </Link>
+        </div>
 
         <Form.Item style={{ marginBottom: 0 }}>
           <Button
@@ -155,23 +157,184 @@ const LoginForm = ({ onSuccess }) => {
 
 // ─── Register Form ────────────────────────────────────────────────────────────
 
-const RegisterForm = () => {
-  const [form] = Form.useForm();
-  const [loading, setLoading] = useState(false);
-  const { message } = App.useApp();
+const RESEND_COOLDOWN = 60; // seconds
 
-  const handleSubmit = useCallback(async () => {
-    setLoading(true);
-    // TODO: wire to POST /auth/register once BE is ready
-    await new Promise((r) => setTimeout(r, 500));
-    setLoading(false);
-    message.info('Registration is coming soon. Please contact your administrator to get an account.');
-    form.resetFields();
-  }, [form, message]);
+const RegisterForm = ({ onRegistered }) => {
+  const [form] = Form.useForm();
+  const [otpForm] = Form.useForm();
+  const [step, setStep] = useState('form'); // 'form' | 'otp'
+  const [loading, setLoading] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const [pendingData, setPendingData] = useState(null); // { email, name, password }
+  const { message } = App.useApp();
+  const cooldownRef = useRef(null);
+
+  // Clear interval on unmount to prevent memory leaks
+  useEffect(() => () => clearInterval(cooldownRef.current), []);
+
+  const startCooldown = useCallback(() => {
+    setCooldown(RESEND_COOLDOWN);
+    cooldownRef.current = setInterval(() => {
+      setCooldown((c) => {
+        if (c <= 1) {
+          clearInterval(cooldownRef.current);
+          return 0;
+        }
+        return c - 1;
+      });
+    }, 1000);
+  }, []);
+
+  const sendOtp = useCallback(
+    async (email, name, password) => {
+      const res = await authApi.candidateRegister(email, name, password);
+      if (res?.statusCode !== undefined && res.statusCode !== 200 && res.statusCode !== 0) {
+        throw new Error(res?.message || 'Failed to send OTP');
+      }
+      return res;
+    },
+    []
+  );
+
+  const handleFormSubmit = useCallback(
+    async (values) => {
+      setLoading(true);
+      try {
+        await sendOtp(values.email.trim().toLowerCase(), values.name.trim(), values.password);
+        setPendingData({
+          email: values.email.trim().toLowerCase(),
+          name: values.name.trim(),
+          password: values.password,
+        });
+        setStep('otp');
+        startCooldown();
+        message.success('OTP sent! Please check your email.');
+      } catch (err) {
+        message.error(
+          err.response?.data?.message || err.message || 'Failed to send OTP. Please try again.'
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [sendOtp, startCooldown, message]
+  );
+
+  const handleOtpSubmit = useCallback(
+    async (values) => {
+      setLoading(true);
+      try {
+        const res = await authApi.verifyRegister(
+          pendingData.email,
+          values.otp,
+          pendingData.name,
+          pendingData.password
+        );
+        if (res?.statusCode !== undefined && res.statusCode !== 200 && res.statusCode !== 0) {
+          throw new Error(res?.message || 'OTP verification failed');
+        }
+        message.success('Registration successful! Please sign in.');
+        onRegistered();
+      } catch (err) {
+        message.error(
+          err.response?.data?.message || err.message || 'Invalid or expired OTP.'
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [pendingData, message, onRegistered]
+  );
+
+  const handleResend = useCallback(async () => {
+    if (!pendingData || cooldown > 0) return;
+    setResendLoading(true);
+    try {
+      await sendOtp(pendingData.email, pendingData.name, pendingData.password);
+      startCooldown();
+      message.success('OTP resent! Please check your email.');
+      otpForm.resetFields();
+    } catch (err) {
+      message.error(
+        err.response?.data?.message || err.message || 'Failed to resend OTP.'
+      );
+    } finally {
+      setResendLoading(false);
+    }
+  }, [pendingData, cooldown, sendOtp, startCooldown, message, otpForm]);
+
+  const handleBack = useCallback(() => {
+    clearInterval(cooldownRef.current);
+    setCooldown(0);
+    setStep('form');
+    otpForm.resetFields();
+  }, [otpForm]);
+
+  if (step === 'otp') {
+    return (
+      <div style={{ marginTop: 4 }}>
+        <Button
+          type="text"
+          icon={<ArrowLeftOutlined />}
+          onClick={handleBack}
+          style={{ padding: 0, marginBottom: 16, color: '#595959' }}
+        >
+          Back
+        </Button>
+
+        <Text type="secondary" style={{ display: 'block', marginBottom: 20, fontSize: 13 }}>
+          We sent a 6-digit OTP to <strong>{pendingData?.email}</strong>. Enter it below to complete registration.
+        </Text>
+
+        <Form form={otpForm} layout="vertical" onFinish={handleOtpSubmit} size="large">
+          <Form.Item
+            name="otp"
+            label="OTP Code"
+            rules={[
+              { required: true, message: 'Please enter the OTP' },
+              { pattern: /^\d{6}$/, message: 'OTP must be 6 digits' },
+            ]}
+          >
+            <Input
+              placeholder="123456"
+              maxLength={6}
+              style={{ letterSpacing: 6, fontWeight: 600, fontSize: 18 }}
+            />
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 8 }}>
+            <Button
+              type="primary"
+              htmlType="submit"
+              block
+              loading={loading}
+              style={{ height: 44, fontWeight: 500 }}
+            >
+              Verify & Create Account
+            </Button>
+          </Form.Item>
+
+          <div style={{ textAlign: 'center' }}>
+            <Button
+              type="text"
+              icon={<ReloadOutlined />}
+              onClick={handleResend}
+              loading={resendLoading}
+              disabled={cooldown > 0}
+              style={{ color: cooldown > 0 ? '#bfbfbf' : '#4F46E5', fontSize: 13 }}
+            >
+              {cooldown > 0 ? `Resend OTP in ${cooldown}s` : 'Resend OTP'}
+            </Button>
+          </div>
+        </Form>
+      </div>
+    );
+  }
 
   return (
     <>
-      <Form form={form} layout="vertical" onFinish={handleSubmit} size="large" style={{ marginTop: 4 }}>
+      <Form form={form} layout="vertical" onFinish={handleFormSubmit} size="large" style={{ marginTop: 4 }}>
         <Form.Item
           name="name"
           label="Full Name"
@@ -180,20 +343,6 @@ const RegisterForm = () => {
           <Input
             prefix={<UserOutlined style={{ color: '#bfbfbf' }} />}
             placeholder="John Doe"
-          />
-        </Form.Item>
-
-        <Form.Item
-          name="phone"
-          label="Phone Number"
-          rules={[
-            { required: true, message: 'Please enter your phone number' },
-            { pattern: /^[0-9]{9,11}$/, message: 'Invalid phone number format' },
-          ]}
-        >
-          <Input
-            prefix={<PhoneOutlined style={{ color: '#bfbfbf' }} />}
-            placeholder="0912 345 678"
           />
         </Form.Item>
 
@@ -233,9 +382,7 @@ const RegisterForm = () => {
             { required: true, message: 'Please confirm your password' },
             ({ getFieldValue }) => ({
               validator(_, value) {
-                if (!value || getFieldValue('password') === value) {
-                  return Promise.resolve();
-                }
+                if (!value || getFieldValue('password') === value) return Promise.resolve();
                 return Promise.reject(new Error('Passwords do not match'));
               },
             }),
@@ -255,7 +402,7 @@ const RegisterForm = () => {
             loading={loading}
             style={{ height: 44, fontWeight: 500 }}
           >
-            Create Account
+            Send OTP
           </Button>
         </Form.Item>
       </Form>
@@ -270,6 +417,7 @@ const RegisterForm = () => {
 const Login = () => {
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'login');
+  const [registerKey, setRegisterKey] = useState(0);
   const navigate = useNavigate();
 
   const handleLoginSuccess = useCallback(
@@ -280,6 +428,11 @@ const Login = () => {
     [navigate]
   );
 
+  const handleRegistered = useCallback(() => {
+    setActiveTab('login');
+    setRegisterKey((k) => k + 1); // force remount → reset form state + clear interval
+  }, []);
+
   const tabItems = [
     {
       key: 'login',
@@ -289,7 +442,7 @@ const Login = () => {
     {
       key: 'register',
       label: 'Sign Up',
-      children: <RegisterForm />,
+      children: <RegisterForm key={registerKey} onRegistered={handleRegistered} />,
     },
   ];
 

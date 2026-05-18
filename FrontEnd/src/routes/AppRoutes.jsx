@@ -9,6 +9,7 @@ import ProtectedRoute from '@/components/common/ProtectedRoute';
 
 // Pages
 import Login from '@/pages/Login';
+import ForgotPasswordPage from '@/pages/ForgotPasswordPage';
 import PositionsPage from '@/pages/hr/PositionsPage';
 import CandidatesPage from '@/pages/hr/CandidatesPage';
 import HRChatbotPage from '@/pages/hr/HRChatbotPage';
@@ -34,6 +35,7 @@ const AppRoutes = () => {
       <Routes>
         {/* Public Routes */}
         <Route path="/login" element={<Login />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         
         {/* Candidate Layout (includes Public Careers and Protected Routes) */}
         <Route path="/" element={<CandidateLayout><Outlet /></CandidateLayout>}>

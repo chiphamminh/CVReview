@@ -81,8 +81,8 @@ public class AuthService {
 
             LoginData.AccountInfo accountInfo = new LoginData.AccountInfo(
                     user.getId(),
-                    user.getEmail(),
                     user.getName(),
+                    user.getEmail(),
                     user.getPhone(),
                     user.getRole(),
                     user.getCreatedAt());
@@ -263,7 +263,7 @@ public class AuthService {
             RefreshToken refreshToken = refreshTokenService.createRefreshToken(user);
 
             LoginData.AccountInfo accountInfo = new LoginData.AccountInfo(
-                    user.getId(), user.getEmail(), user.getName(),
+                    user.getId(), user.getName(), user.getEmail(),
                     user.getPhone(), user.getRole(), user.getCreatedAt());
 
             return new ApiResponse<>(ErrorCode.SUCCESS.getCode(),
