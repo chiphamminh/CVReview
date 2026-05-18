@@ -80,7 +80,7 @@ def build_hr_prompts_node(state: HRChatState) -> HRChatState:
 
     if state.get("jd_context"):
         for chunk in state["jd_context"]:
-            name = chunk.get("payload", {}).get("positionName")
+            name = chunk.get("payload", {}).get("positionTitle")
             if name:
                 position_name = name
                 break

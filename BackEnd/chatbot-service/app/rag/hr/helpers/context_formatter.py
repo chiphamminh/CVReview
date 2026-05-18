@@ -73,7 +73,7 @@ def _format_jd_context(jd_context: List[Dict[str, Any]]) -> str:
         pid = payload.get("positionId")
         if pid and pid not in pos_info:
             pos_info[pid] = {
-                "name": payload.get("positionName", "Unknown"),
+                "name": payload.get("positionTitle", "Unknown"),
                 "chunks": []
             }
         if pid:

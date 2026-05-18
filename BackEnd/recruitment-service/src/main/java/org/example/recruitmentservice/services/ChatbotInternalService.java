@@ -277,6 +277,10 @@ public class ChatbotInternalService {
                                 .candidateEmail(cv.getEmail())
                                 .appCvId(cv.getId())
                                 .masterCvId(cv.getParentCvId())
+                                .positionName(cv.getPosition() != null
+                                                ? PositionUtils.formatPositionTitle(cv.getPosition().getSeniority(),
+                                                                cv.getPosition().getTitle())
+                                                : null)
                                 .sourceType(cv.getSourceType() != null ? cv.getSourceType().name() : null);
 
                 if (analysis != null) {

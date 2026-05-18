@@ -18,6 +18,8 @@ import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Objects;
 
@@ -81,7 +83,7 @@ public class NotificationService {
         Context ctx = new Context();
         ctx.setVariable("candidateName", request.getCandidateName());
         ctx.setVariable("positionName", request.getPositionName());
-        ctx.setVariable("interviewDate", request.getInterviewDate());
+        ctx.setVariable("interviewDate", formatInterviewDate(request.getInterviewDate()));
         ctx.setVariable("customMessage", request.getCustomMessage());
         ctx.setVariable("benefit", request.getBenefit());
         ctx.setVariable("salary", request.getSalary());
@@ -89,6 +91,18 @@ public class NotificationService {
         ctx.setVariable("offerExpirationDate", request.getOfferExpirationDate());
         ctx.setVariable("additionalNote", request.getAdditionalNote());
         return templateEngine.process(templateName, ctx);
+    }
+
+    private String formatInterviewDate(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            String normalized = raw.trim().replaceFirst(" ", "T");
+            if (normalized.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}$")) normalized += ":00";
+            LocalDateTime ldt = LocalDateTime.parse(normalized);
+            return ldt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+        } catch (Exception e) {
+            return raw;
+        }
     }
 
     private void sendHtmlEmail(String to, String subject, String htmlContent, List<MultipartFile> attachments) {
