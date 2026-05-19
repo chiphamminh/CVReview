@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Row, Col, Card, Typography, Segmented, Button, Space, Alert, Select } from 'antd';
 import {
   FileDoneOutlined, StarOutlined, ClockCircleOutlined,
@@ -12,6 +12,7 @@ import SourceBreakdownChart from '@/components/dashboard/SourceBreakdownChart';
 import ScoreTrendChart from '@/components/dashboard/ScoreTrendChart';
 import PositionsHealthTable from '@/components/dashboard/PositionsHealthTable';
 import { analyticsApi } from '@/api/analytics.api';
+import useDashboardStore from '@/store/dashboardStore';
 
 const { Text, Title } = Typography;
 
@@ -20,15 +21,14 @@ const STATUS_COLORS = ['#52c41a', '#1677ff', '#ff4d4f'];
 const STALE_TIME = 60_000;
 
 const THRESHOLD_HEALTH = (rate) => {
-  if (rate < 5)  return { label: 'Too High',  color: '#ff4d4f',  icon: '🔴' };
-  if (rate <= 30) return { label: 'Balanced',  color: '#52c41a',  icon: '🟢' };
-  if (rate <= 60) return { label: 'Generous',  color: '#faad14',  icon: '🟡' };
-  return            { label: 'Low Bar',    color: '#fa541c',  icon: '🟠' };
+  if (rate < 5)   return { label: 'Too High', color: '#ff4d4f' };
+  if (rate <= 30) return { label: 'Balanced', color: '#52c41a' };
+  if (rate <= 60) return { label: 'Generous', color: '#faad14' };
+  return           { label: 'Low Bar',    color: '#fa541c' };
 };
 
 const HRDashboardPage = () => {
-  const [days, setDays] = useState(30);
-  const [selectedPositionId, setSelectedPositionId] = useState(null);
+  const { days, setDays, selectedPositionId, setSelectedPositionId } = useDashboardStore();
   const queryClient = useQueryClient();
 
   // ── Active positions for dropdown ──────────────────────────────────────────
@@ -44,8 +44,8 @@ const HRDashboardPage = () => {
   );
   const threshold = selectedPosition?.minimumFitScore ?? 70;
 
-  // ── Core KPI queries (adapt to position filter) ────────────────────────────
-  const { data: trafficRes, isLoading: trafficLoading, isError: trafficError } = useQuery({
+  // ── Core KPI queries ───────────────────────────────────────────────────────
+  const { data: trafficRes, isLoading: trafficLoading, isFetching: trafficFetching, isError: trafficError } = useQuery({
     queryKey: ['hr-traffic', days, selectedPositionId],
     queryFn: () => analyticsApi.getCvTraffic(days, selectedPositionId),
     staleTime: STALE_TIME,
@@ -63,7 +63,7 @@ const HRDashboardPage = () => {
     staleTime: 300_000,
   });
 
-  // ── New feature queries ─────────────────────────────────────────────────────
+  // ── New feature queries ────────────────────────────────────────────────────
   const { data: pipelineRes, isLoading: pipelineLoading, isError: pipelineError } = useQuery({
     queryKey: ['hr-stage-pipeline', selectedPositionId],
     queryFn: () => analyticsApi.getStagePipeline(selectedPositionId),
@@ -88,7 +88,7 @@ const HRDashboardPage = () => {
     staleTime: 120_000,
   });
 
-  // ── Derived values ──────────────────────────────────────────────────────────
+  // ── Derived values ─────────────────────────────────────────────────────────
   const traffic = trafficRes?.data ?? {};
   const overview = overviewRes?.data ?? {};
   const buckets = distributionRes?.data?.buckets ?? [];
@@ -102,11 +102,11 @@ const HRDashboardPage = () => {
   const timeSavedHours = Math.ceil((traffic.successCv ?? 0) * 5 / 60);
   const thresholdHealth = THRESHOLD_HEALTH(overview.successMatchRate ?? 0);
 
-  // Score distribution: sparsity guard when filtering a specific position
   const totalBucketCount = buckets.reduce((s, b) => s + b.count, 0);
   const showSparsityWarning = selectedPositionId !== null && totalBucketCount < 5;
 
   const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['active-positions'] });
     queryClient.invalidateQueries({ queryKey: ['hr-traffic'] });
     queryClient.invalidateQueries({ queryKey: ['hr-overview'] });
     queryClient.invalidateQueries({ queryKey: ['hr-score-distribution'] });
@@ -116,7 +116,7 @@ const HRDashboardPage = () => {
     queryClient.invalidateQueries({ queryKey: ['hr-positions-health'] });
   };
 
-  // ── Score Distribution chart config ────────────────────────────────────────
+  // ── Score Distribution chart config ───────────────────────────────────────
   const maxBucketCount = Math.max(...buckets.map((b) => b.count), 1);
   const columnConfig = {
     data: buckets,
@@ -168,7 +168,7 @@ const HRDashboardPage = () => {
     autoFit: true,
   };
 
-  // ── KPI cards definition ───────────────────────────────────────────────────
+  // ── KPI cards ──────────────────────────────────────────────────────────────
   const kpiCards = [
     {
       key: 'pool',
@@ -209,7 +209,6 @@ const HRDashboardPage = () => {
       note: '~5 min/CV',
       loading: isKpiLoading,
     },
-    // Threshold Health card — only shown when a specific position is selected
     ...(selectedPositionId !== null ? [{
       key: 'threshold',
       icon: <AimOutlined />,
@@ -247,11 +246,13 @@ const HRDashboardPage = () => {
               { label: '90 Days', value: 90 },
             ]}
           />
-          <Button icon={<ReloadOutlined />} onClick={handleRefresh}>Refresh</Button>
+          <Button icon={<ReloadOutlined />} onClick={handleRefresh} loading={trafficFetching}>
+            Refresh
+          </Button>
         </Space>
       </div>
 
-      {/* KPI Cards — flex container supports 4 or 5 cards without layout shift */}
+      {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
         {kpiCards.map((card) => (
           <div key={card.key} style={{ flex: '1 1 180px', minWidth: 0 }}>

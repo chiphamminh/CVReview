@@ -81,7 +81,7 @@ const CandidatesPage = () => {
     enabled: activeTab === 'candidates',
   });
 
-  const { data: failedBatchesData, isLoading: isFailedLoading, refetch: refetchFailed } = useQuery({
+  const { data: failedBatchesData, isFetching: isFailedFetching, refetch: refetchFailed } = useQuery({
     queryKey: ['failed-batches'],
     queryFn: () => candidateApi.getFailedBatches(),
     enabled: activeTab === 'failed',
@@ -324,7 +324,7 @@ const CandidatesPage = () => {
       dataIndex: 'errorMessage',
       key: 'errorMessage',
       render: (msg) => msg
-        ? <Paragraph ellipsis={{ rows: 2, tooltip: msg }} style={{ margin: 0, fontSize: 12, color: '#cf1322' }}>{msg}</Paragraph>
+        ? <Paragraph ellipsis={{ rows: 2, tooltip: msg }} style={{ margin: 0, fontSize: 14, color: '#cf1322' }}>{msg}</Paragraph>
         : <Text type="secondary">-</Text>,
     },
     {
@@ -385,7 +385,7 @@ const CandidatesPage = () => {
       dataIndex: 'errorMessage',
       key: 'errorMessage',
       render: (msg) => msg
-        ? <Paragraph ellipsis={{ rows: 2, tooltip: msg }} style={{ margin: 0, fontSize: 12, color: '#cf1322' }}>{msg}</Paragraph>
+        ? <Paragraph ellipsis={{ rows: 2, tooltip: msg }} style={{ margin: 0, fontSize: 14, color: '#cf1322' }}>{msg}</Paragraph>
         : <Text type="secondary">-</Text>,
     },
     {
@@ -546,7 +546,7 @@ const CandidatesPage = () => {
           >
             Delete Selected ({selectedBatchIds.length})
           </Button>
-          <Button icon={<ReloadOutlined />} onClick={() => refetchFailed()} style={{ marginLeft: 'auto' }}>
+          <Button icon={<ReloadOutlined />} onClick={() => refetchFailed()} loading={isFailedFetching} style={{ marginLeft: 'auto' }}>
             Refresh
           </Button>
         </div>
@@ -580,7 +580,7 @@ const CandidatesPage = () => {
           columns={failedColumns}
           dataSource={failedBatches}
           rowKey="batchId"
-          loading={isFailedLoading || deleteFailedMutation.isPending}
+          loading={isFailedFetching || deleteFailedMutation.isPending}
           pagination={false}
           expandable={{
             expandedRowRender: (record) => (

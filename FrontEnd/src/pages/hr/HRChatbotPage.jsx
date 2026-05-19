@@ -126,6 +126,33 @@ const HRChatbotPage = () => {
     }
   }, [selectedPositionId]);
 
+  // ── Reload current session messages ──
+  const reloadCurrentMessages = useCallback(async () => {
+    if (!currentSessionId) return;
+    setLoadingHistory(true);
+    setMessages([]);
+    setFirstMessageId(null);
+    setHasOlderMessages(false);
+    try {
+      const res = await chatbotApi.getSessionHistory(currentSessionId, { limit: CHAT_PAGE_SIZE });
+      const history = res.data || [];
+      const feMsgs = history.map(m => ({ id: m.id, role: mapRole(m.role), content: m.content }));
+      setMessages(feMsgs);
+      if (history.length > 0) {
+        setFirstMessageId(history[0].id);
+        setHasOlderMessages(history.length === CHAT_PAGE_SIZE);
+      }
+    } catch {
+      antMessage.error('Failed to reload messages');
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [currentSessionId]);
+
+  const handleRefresh = useCallback(async () => {
+    await Promise.all([loadSessions(), reloadCurrentMessages()]);
+  }, [loadSessions, reloadCurrentMessages]);
+
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
   // ── Scroll to bottom on new messages (suppressed during prepend) ──
@@ -392,7 +419,7 @@ const HRChatbotPage = () => {
                   {mode}
                 </Tag>
               )}
-              <Button icon={<ReloadOutlined />} onClick={loadSessions}>
+              <Button icon={<ReloadOutlined />} onClick={handleRefresh} loading={loadingHistory}>
                 Refresh
               </Button>
             </Space>
