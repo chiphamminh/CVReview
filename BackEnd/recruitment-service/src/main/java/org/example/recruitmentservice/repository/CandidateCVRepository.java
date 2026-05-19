@@ -35,10 +35,15 @@ public interface CandidateCVRepository extends JpaRepository<CandidateCV, Intege
        long countByPositionIdAndSourceType(@Param("positionId") int positionId,
                      @Param("sourceType") SourceType sourceType);
 
-       @Query("SELECT COUNT(c) FROM CandidateCV c WHERE c.updatedAt >= :date")
+       @Query("SELECT COUNT(c) FROM CandidateCV c " +
+                     "WHERE c.position IS NOT NULL " +
+                     "AND c.updatedAt >= :date")
        long countTotalCVsAfterDate(@Param("date") java.time.LocalDateTime date);
 
-       @Query("SELECT COUNT(c) FROM CandidateCV c WHERE c.cvStatus = :status AND c.updatedAt >= :date")
+       @Query("SELECT COUNT(c) FROM CandidateCV c " +
+                     "WHERE c.position IS NOT NULL " +
+                     "AND c.cvStatus = :status " +
+                     "AND c.updatedAt >= :date")
        long countByCvStatusAndDateAfter(@Param("status") CVStatus status, @Param("date") java.time.LocalDateTime date);
 
        /**
@@ -154,4 +159,51 @@ public interface CandidateCVRepository extends JpaRepository<CandidateCV, Intege
        List<CandidateCV> findInterviewsPastDue(
                      @Param("stage") RecruitmentStage stage,
                      @Param("now") LocalDateTime now);
+
+       // -------------------------------------------------------
+       // Queries phục vụ HR Analytics Dashboard (position-filtered)
+       // -------------------------------------------------------
+
+       @Query("SELECT COUNT(c) FROM CandidateCV c " +
+                     "WHERE c.position.id = :positionId " +
+                     "AND c.updatedAt >= :date")
+       long countTotalByPositionAfterDate(@Param("positionId") int positionId, @Param("date") LocalDateTime date);
+
+       @Query("SELECT COUNT(c) FROM CandidateCV c " +
+                     "WHERE c.position.id = :positionId " +
+                     "AND c.cvStatus = :status " +
+                     "AND c.updatedAt >= :date")
+       long countByPositionAndStatusAfterDate(@Param("positionId") int positionId, @Param("status") CVStatus status, @Param("date") LocalDateTime date);
+
+       /** Tổng CV không bị soft-delete của 1 position — dùng cho positions health table. */
+       @Query("SELECT COUNT(c) FROM CandidateCV c " +
+                     "WHERE c.position.id = :positionId " +
+                     "AND c.deletedAt IS NULL")
+       long countActiveByPositionId(@Param("positionId") int positionId);
+
+       // Stage pipeline counts — all positions (excludes Master CVs có position=NULL)
+       @Query("SELECT COUNT(c) FROM CandidateCV c " +
+                     "WHERE c.recruitmentStage = :stage " +
+                     "AND c.position IS NOT NULL " +
+                     "AND c.deletedAt IS NULL")
+       long countByStageAllPositions(@Param("stage") RecruitmentStage stage);
+
+       @Query("SELECT COUNT(c) FROM CandidateCV c " +
+                     "WHERE c.recruitmentStage = :stage " +
+                     "AND c.position.id = :positionId " +
+                     "AND c.deletedAt IS NULL")
+       long countByStageAndPositionId(@Param("stage") RecruitmentStage stage, @Param("positionId") int positionId);
+
+       // Source breakdown counts
+       @Query("SELECT COUNT(c) FROM CandidateCV c " +
+                     "WHERE c.sourceType = :sourceType " +
+                     "AND c.updatedAt >= :date " +
+                     "AND c.position IS NOT NULL")
+       long countBySourceTypeAfterDate(@Param("sourceType") SourceType sourceType, @Param("date") LocalDateTime date);
+
+       @Query("SELECT COUNT(c) FROM CandidateCV c " +
+                     "WHERE c.position.id = :positionId " +
+                     "AND c.sourceType = :sourceType " +
+                     "AND c.deletedAt IS NULL")
+       long countActiveByPositionAndSourceType(@Param("positionId") int positionId, @Param("sourceType") SourceType sourceType);
 }

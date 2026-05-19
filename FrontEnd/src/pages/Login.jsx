@@ -422,7 +422,7 @@ const Login = () => {
 
   const handleLoginSuccess = useCallback(
     (role) => {
-      if (role === 'HR' || role === 'ADMIN') navigate('/hr/positions');
+      if (role === 'HR' || role === 'ADMIN') navigate('/hr/dashboard');
       else navigate('/candidate/cv');
     },
     [navigate]
