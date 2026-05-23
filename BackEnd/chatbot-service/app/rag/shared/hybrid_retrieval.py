@@ -47,6 +47,7 @@ _KEYWORD_WEIGHT = 0.4           # Keyword search contribution to RRF score
 _DENSE_FETCH_MULTIPLIER = 4     # dense limit = top_n * 4
 _KEYWORD_FETCH_MULTIPLIER = 3   # keyword limit = top_n * 3
 _MAX_CHUNKS_PER_CV = 6          # Cap chunks per cvId before passing to reranker
+_MIN_DENSE_FETCH = 30           # Minimum dense fetch regardless of top_n — prevents near-empty reranker pool
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +61,7 @@ async def _dense_search(
     limit: int,
     score_threshold: float = 0.25,
     must_not_conditions: Optional[List] = None,
+    query_vector: Optional[List[float]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Dense vector search using the expanded query.
@@ -67,9 +69,10 @@ async def _dense_search(
     pool executor so they don't block the asyncio event loop when called in gather().
     """
     loop = asyncio.get_running_loop()
-    query_vector = await loop.run_in_executor(
-        None, lambda: embedding_service.embed_text(query_text, is_query=True)
-    )
+    if query_vector is None:
+        query_vector = await loop.run_in_executor(
+            None, lambda: embedding_service.embed_text(query_text, is_query=True)
+        )
 
     qdrant_filter: Optional[Filter] = None
     if base_filters or must_not_conditions:
@@ -193,6 +196,8 @@ async def hybrid_retrieve_cv(
     skill_keywords: Optional[List[str]] = None,
     skill_logic: str = "OR",
     skip_rerank: bool = False,
+    query_vector: Optional[List[float]] = None,
+    rerank_query: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Hybrid retrieval for CV collection: Dense + Keyword → RRF → Cross-encoder rerank.
@@ -210,7 +215,7 @@ async def hybrid_retrieve_cv(
         List of reranked CV chunks (one per unique cvId, highest-scoring chunk).
     """
     collection    = settings.CV_COLLECTION_NAME
-    dense_limit   = top_n * _DENSE_FETCH_MULTIPLIER
+    dense_limit   = max(top_n * _DENSE_FETCH_MULTIPLIER, _MIN_DENSE_FETCH)
     keyword_limit = top_n * _KEYWORD_FETCH_MULTIPLIER
 
     # Build the must_not exclusion list once — passed to both search legs.
@@ -223,7 +228,7 @@ async def hybrid_retrieve_cv(
     )
 
     # Run dense and keyword legs in parallel
-    dense_task   = _dense_search(query, collection, base_filters, dense_limit, score_threshold, must_not_conditions)
+    dense_task   = _dense_search(query, collection, base_filters, dense_limit, score_threshold, must_not_conditions, query_vector)
     keyword_task = _keyword_search(
         skill_variants, collection, base_filters, keyword_limit, must_not_conditions,
         skill_keywords=skill_keywords, skill_logic=skill_logic,
@@ -281,7 +286,7 @@ async def hybrid_retrieve_cv(
 
     # Cross-encoder rerank — run in executor to avoid blocking the event loop
     reranked = await reranker.rerank_and_group_async(
-        query=query,
+        query=rerank_query or query,
         chunks=capped,
         id_field="cvId",
         top_n=top_n,

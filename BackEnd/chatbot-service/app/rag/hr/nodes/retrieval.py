@@ -16,18 +16,23 @@ Strategy routing:
 """
 
 import asyncio
-from typing import List, Dict, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 
 from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
 
 from app.rag.hr.state import HRChatState
 from app.rag.hr.router import _extract_top_n
 from app.rag.shared.hybrid_retrieval import hybrid_retrieve_cv
-from app.services.retriever import retriever
+from app.services.retriever import retriever, get_chunk_text
 from app.config import get_settings
 from app.rag.hr.helpers.cv_assembler import assemble_virtual_full_cv
 
 settings = get_settings()
+
+# JD ranking-vector cache: positionId → (dense_vector, rerank_query).
+# Built once per position from all JD chunks via scroll (no query vector needed).
+# In-memory cache resets on service restart — acceptable since JDs rarely change.
+_JD_RANKING_CACHE: Dict[int, Tuple[List[float], str]] = {}
 
 # ---------------------------------------------------------------------------
 # Pinned fetch — COMPARE / DETAIL
@@ -127,6 +132,63 @@ async def _fetch_jd_context(
 
 
 # ---------------------------------------------------------------------------
+# JD ranking vector builder (INTERNAL mode only)
+# ---------------------------------------------------------------------------
+
+async def _get_jd_ranking_vector(position_id: int) -> Tuple[Optional[List[float]], str]:
+    """
+    Build and cache a JD ranking vector from ALL chunks of the given position.
+
+    Uses Qdrant scroll (no query vector) to fetch every JD chunk, concatenates
+    their text, then embeds once. Cached per position_id for the lifetime of the
+    process — JDs are treated as immutable after upload.
+
+    Returns:
+        (ranking_vector, rerank_query) where rerank_query is the first 100 words
+        of the JD text (used as the cross-encoder query instead of HR's conversational
+        string). Returns (None, "") if no JD chunks exist for the position.
+    """
+    if position_id in _JD_RANKING_CACHE:
+        print(f"[JD Vector] Cache hit for position_id={position_id}")
+        return _JD_RANKING_CACHE[position_id]
+
+    loop = asyncio.get_running_loop()
+    results, _ = await loop.run_in_executor(
+        None,
+        lambda: retriever.qdrant_service.get_client().scroll(
+            collection_name=retriever.jd_collection,
+            scroll_filter=Filter(must=[
+                FieldCondition(key="positionId", match=MatchValue(value=position_id))
+            ]),
+            limit=50,
+            with_payload=True,
+            with_vectors=False,
+        ),
+    )
+
+    if not results:
+        print(f"[JD Vector] No JD chunks for position_id={position_id} — dense search will fall back to query embedding")
+        return None, ""
+
+    jd_texts = [
+        get_chunk_text(r.payload).strip()
+        for r in results
+        if get_chunk_text(r.payload).strip()
+    ]
+    jd_full_text = " ".join(jd_texts)
+    words = jd_full_text.split()
+    rerank_query = " ".join(words[:100])
+
+    ranking_vector = await retriever._embed_async(jd_full_text)
+    _JD_RANKING_CACHE[position_id] = (ranking_vector, rerank_query)
+    print(
+        f"[JD Vector] Built and cached for position_id={position_id} "
+        f"({len(results)} chunks, {len(words)} words)"
+    )
+    return ranking_vector, rerank_query
+
+
+# ---------------------------------------------------------------------------
 # Main node
 # ---------------------------------------------------------------------------
 
@@ -209,8 +271,17 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
     # tiebreaker since avg_score (pre-computed by candidate chatbot) is the primary signal.
     is_external = state["mode"] == "EXTERNAL"
 
+    # ---- For INTERNAL mode: resolve JD ranking vector ----
+    # EXTERNAL mode uses pre-computed avg_score as primary signal — JD vector not needed.
+    # For INTERNAL mode, ranking CVs against the JD vector (not HR's conversational query)
+    # is the correct semantic approach. Cache hit is instant after the first query.
+    jd_vector: Optional[List[float]] = None
+    jd_rerank_query: Optional[str] = None
+    if not is_external:
+        jd_vector, jd_rerank_query = await _get_jd_ranking_vector(position_id)
+
     # ---- HYBRID RETRIEVAL + JD fetch — run concurrently ----
-    # hybrid_retrieve_cv uses expanded_query for better CV recall.
+    # hybrid_retrieve_cv uses expanded_query as fallback when jd_vector is None.
     # _fetch_jd_context uses the original query for prompt-relevance (not expansion).
     cv_results, jd_results = await asyncio.gather(
         hybrid_retrieve_cv(
@@ -222,6 +293,8 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
             skill_keywords=skill_keywords,
             skill_logic=skill_logic,
             skip_rerank=is_external,
+            query_vector=jd_vector,
+            rerank_query=jd_rerank_query if jd_rerank_query else None,
         ),
         _fetch_jd_context(position_id, query),
     )
@@ -246,6 +319,7 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
         "top_n_requested":        top_n,
         "skill_variants_used":    skill_variants,
         "excluded_cv_ids":        exclude_ids,
+        "jd_vector_used":         jd_vector is not None,
     }
 
     # Persist active_cv_ids for follow-up COMPARE / DETAIL turns.
