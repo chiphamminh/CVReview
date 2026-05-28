@@ -17,7 +17,7 @@ if [ -z "$1" ]; then
 fi
 
 VERSION=$1
-DOCKER_USERNAME="toilachi1604 "  # Thay bằng username Docker Hub của bạn
+DOCKER_USERNAME="toilachi1604"  # Thay bằng username Docker Hub của bạn
 
 echo "Bắt đầu build và push images với version: $VERSION"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -30,9 +30,9 @@ docker login
 SERVICES=(
     "auth-service"
     "recruitment-service"
-    "ai-service"
     "api-gateway"
     "embedding-api"
+    "chatbot-service"
 )
 
 # Build từ docker-compose với file gốc có build context

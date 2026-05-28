@@ -80,55 +80,27 @@ services:
       start_period: 60s
     restart: unless-stopped
 
-#  chatbot-service:
-#    image: toilachi1604/chatbot-service:v1.0.0
-#    container_name: chatbot-service
-#    hostname: chatbot-service
-#    ports:
-#      - "8085:8085"
-#    depends_on:
-#      rabbitmq:
-#        condition: service_healthy
-#    networks:
-#      microservice-network:
-#        aliases:
-#          - ai-service
-#    environment:
-#      - SPRING_PROFILES_ACTIVE=local
-#      - SPRING_RABBITMQ_HOST=rabbitmq
-#    env_file:
-#      - ./env/chatbot-service.env
-#    healthcheck:
-#      test: [ "CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8085/chatbot/health || exit 1" ]
-#      interval: 15s
-#      timeout: 10s
-#      retries: 10
-#      start_period: 60s
-#    restart: unless-stopped
-
-  ai-service:
-    image: toilachi1604/ai-service:v1.0.1
-    container_name: ai-service
-    hostname: ai-service
+  chatbot-service:
+    image: toilachi1604/chatbot-service:v1.0.0
+    container_name: chatbot-service
+    hostname: chatbot-service
     ports:
-      - "8083:8083"
+      - "8085:8085"
     depends_on:
       rabbitmq:
         condition: service_healthy
     networks:
       microservice-network:
         aliases:
-          - ai-service
-    environment:
-      - SPRING_PROFILES_ACTIVE=local
-      - SPRING_RABBITMQ_HOST=rabbitmq
+          - chatbot-service
     env_file:
-      - ./env/ai-service.env
+      - ./env/chatbot-service.env
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8085"]
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8083/actuator/health || exit 1"]
-      interval: 15s
+      test: ["CMD", "curl", "-f", "http://localhost:8085/chatbot/health"]
+      interval: 30s
       timeout: 10s
-      retries: 10
+      retries: 5
       start_period: 60s
     restart: unless-stopped
 
@@ -161,7 +133,7 @@ services:
     restart: unless-stopped
 
   embedding-worker-cv:
-    image: toilachi1604/embedding-api:v1.0.1
+    image: toilachi1604/embedding-api:v1.0.0
     container_name: embedding-worker-cv
     hostname: embedding-worker-cv
     depends_on:
@@ -219,7 +191,7 @@ services:
         condition: service_healthy
       recruitment-service:
         condition: service_healthy
-      ai-service:
+      chatbot-service:
         condition: service_healthy
       embedding-api:
         condition: service_healthy
