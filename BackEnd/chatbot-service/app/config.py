@@ -53,8 +53,10 @@ class Settings(BaseSettings):
     INTERNAL_SERVICE_SECRET: str = "chatbot-service"
     MAX_HISTORY_TURNS: int = 20
 
-    # Reranker — multilingual model to support both Vietnamese and English queries
-    RERANKER_MODEL_NAME: str = "BAAI/bge-reranker-v2-m3"
+    # Reranker — bge-reranker-base (~278M, ~3.5x faster than v2-m3 on CPU).
+    # The rerank step compares English JD requirements vs English CV text, so the
+    # heavier multilingual v2-m3 is not needed for the INTERNAL ranking path.
+    RERANKER_MODEL_NAME: str = "BAAI/bge-reranker-base"
 
     # LLM Expansion timeout
     EXPANSION_TIMEOUT_SECONDS: float = 4.0

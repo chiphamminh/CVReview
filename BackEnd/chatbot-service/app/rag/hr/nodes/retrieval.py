@@ -29,10 +29,14 @@ from app.rag.hr.helpers.cv_assembler import assemble_virtual_full_cv
 
 settings = get_settings()
 
-# JD ranking-vector cache: positionId → (dense_vector, rerank_query).
-# Built once per position from all JD chunks via scroll (no query vector needed).
-# In-memory cache resets on service restart — acceptable since JDs rarely change.
-_JD_RANKING_CACHE: Dict[int, Tuple[List[float], str]] = {}
+_JD_RANKING_CACHE: Dict[int, Tuple[List[float], str, str]] = {}
+
+_REQUIREMENT_SECTION_MARKERS = (
+    "REQUIRE", "QUALIF", "SKILL", "RESPONSIBIL",
+    "MUST_HAVE", "LOOKING_FOR", "WHAT_YOU", "COMPETEN",
+)
+
+_RERANK_QUERY_MAX_WORDS = 128
 
 # ---------------------------------------------------------------------------
 # Pinned fetch — COMPARE / DETAIL
@@ -135,18 +139,25 @@ async def _fetch_jd_context(
 # JD ranking vector builder (INTERNAL mode only)
 # ---------------------------------------------------------------------------
 
-async def _get_jd_ranking_vector(position_id: int) -> Tuple[Optional[List[float]], str]:
+async def _get_jd_ranking_vector(position_id: int) -> Tuple[Optional[List[float]], str, str]:
     """
-    Build and cache a JD ranking vector from ALL chunks of the given position.
+    Build and cache the JD ranking signals for INTERNAL CV ranking.
 
-    Uses Qdrant scroll (no query vector) to fetch every JD chunk, concatenates
-    their text, then embeds once. Cached per position_id for the lifetime of the
-    process — JDs are treated as immutable after upload.
+    Fetches every JD chunk via Qdrant scroll (no query vector), orders them by
+    chunkIndex, then derives three artifacts (cached per position_id for the
+    process lifetime — JDs are immutable after upload):
 
-    Returns:
-        (ranking_vector, rerank_query) where rerank_query is the first 100 words
-        of the JD text (used as the cross-encoder query instead of HR's conversational
-        string). Returns (None, "") if no JD chunks exist for the position.
+      - ranking_vector: dense vector embedded from the REQUIREMENTS section(s) only
+        (fuzzy-matched by section name). Falls back to the full JD when no
+        requirements-like section exists. Ranking against the focused requirements
+        text — rather than the whole JD (intro/benefits dilute the average, and the
+        embedder truncates at 512 tokens) — gives a far more discriminative signal.
+      - rerank_query: first _RERANK_QUERY_MAX_WORDS words of that same requirements
+        text, used as the cross-encoder query instead of HR's conversational string.
+      - full_jd_text: the entire JD (all sections, ordered) — consumed by the scoring
+        node for holistic CV evaluation.
+
+    Returns (None, "", "") if no JD chunks exist for the position.
     """
     if position_id in _JD_RANKING_CACHE:
         print(f"[JD Vector] Cache hit for position_id={position_id}")
@@ -168,24 +179,44 @@ async def _get_jd_ranking_vector(position_id: int) -> Tuple[Optional[List[float]
 
     if not results:
         print(f"[JD Vector] No JD chunks for position_id={position_id} — dense search will fall back to query embedding")
-        return None, ""
+        return None, "", ""
 
-    jd_texts = [
-        get_chunk_text(r.payload).strip()
-        for r in results
-        if get_chunk_text(r.payload).strip()
+    # Order by document position — scroll order is by point id (non-deterministic
+    # relative to JD layout), so without this the "full text" and the truncated
+    # embedding would represent an arbitrary slice of the JD.
+    ordered = sorted(results, key=lambda r: r.payload.get("chunkIndex", 0))
+
+    full_jd_text = " ".join(
+        t for t in (get_chunk_text(r.payload).strip() for r in ordered) if t
+    )
+
+    # Select requirements-like sections for the ranking signal.
+    req_chunks = [
+        r for r in ordered
+        if any(marker in (r.payload.get("sectionName") or "").upper()
+               for marker in _REQUIREMENT_SECTION_MARKERS)
     ]
-    jd_full_text = " ".join(jd_texts)
-    words = jd_full_text.split()
-    rerank_query = " ".join(words[:100])
+    req_text = " ".join(
+        t for t in (get_chunk_text(r.payload).strip() for r in req_chunks) if t
+    ).strip()
 
-    ranking_vector = await retriever._embed_async(jd_full_text)
-    _JD_RANKING_CACHE[position_id] = (ranking_vector, rerank_query)
+    # Fallback: no requirements-like section found → rank against the whole JD.
+    ranking_text = req_text or full_jd_text
+    used_sections = (
+        sorted({(r.payload.get("sectionName") or "?") for r in req_chunks})
+        if req_text else ["<full JD fallback>"]
+    )
+
+    rerank_query = " ".join(ranking_text.split()[:_RERANK_QUERY_MAX_WORDS])
+    ranking_vector = await retriever._embed_async(ranking_text)
+
+    _JD_RANKING_CACHE[position_id] = (ranking_vector, rerank_query, full_jd_text)
     print(
         f"[JD Vector] Built and cached for position_id={position_id} "
-        f"({len(results)} chunks, {len(words)} words)"
+        f"({len(results)} chunks, ranking_text={len(ranking_text.split())} words, "
+        f"sections={used_sections})"
     )
-    return ranking_vector, rerank_query
+    return ranking_vector, rerank_query, full_jd_text
 
 
 # ---------------------------------------------------------------------------
@@ -273,12 +304,15 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
 
     # ---- For INTERNAL mode: resolve JD ranking vector ----
     # EXTERNAL mode uses pre-computed avg_score as primary signal — JD vector not needed.
-    # For INTERNAL mode, ranking CVs against the JD vector (not HR's conversational query)
+    # For INTERNAL mode, ranking CVs against the JD vector
     # is the correct semantic approach. Cache hit is instant after the first query.
     jd_vector: Optional[List[float]] = None
     jd_rerank_query: Optional[str] = None
     if not is_external:
-        jd_vector, jd_rerank_query = await _get_jd_ranking_vector(position_id)
+        jd_vector, jd_rerank_query, full_jd_text = await _get_jd_ranking_vector(position_id)
+        # Persist the full JD so the scoring node evaluates each CV against the
+        # complete JD instead of the 3 query-retrieved chunks in jd_context.
+        state["full_jd_text"] = full_jd_text
 
     # ---- HYBRID RETRIEVAL + JD fetch — run concurrently ----
     # hybrid_retrieve_cv uses expanded_query as fallback when jd_vector is None.
@@ -322,7 +356,6 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
         "jd_vector_used":         jd_vector is not None,
     }
 
-    # Persist active_cv_ids for follow-up COMPARE / DETAIL turns.
     if strategy != "FIND_MORE":
         requested_n = entities.get("top_n") or _extract_top_n(query)
         seen: set = set()
@@ -336,7 +369,6 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
                     break
         
         state["active_cv_ids"] = deduped_ids
-        # F13: build ranked list with names for ordinal resolution ("người thứ 2")
         cv_id_to_meta = state.get("cv_id_to_meta", {})
         state["ranked_cv_list"] = [
             {"rank": i + 1, "cvId": cid, "name": cv_id_to_meta.get(cid, {}).get("candidateName", f"CV-{cid}")}
@@ -349,7 +381,6 @@ async def retrieve_hr_context_node(state: HRChatState) -> HRChatState:
             for chunk in cv_results
             if chunk.get("payload", {}).get("cvId") is not None
         ]
-        # Merge: old (shown before) + new (just found), deduped, order preserved
         merged = list(dict.fromkeys(active_cv_ids + new_ids))
         state["active_cv_ids"] = merged
         print(f"[HR Retrieve] FIND_MORE merged active_cv_ids={merged}")

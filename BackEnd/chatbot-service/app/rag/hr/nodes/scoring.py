@@ -115,10 +115,12 @@ async def hr_scoring_node(state: HRChatState) -> HRChatState:
         state["pending_scoring_candidates"] = None
         return state
 
-    jd_text = (
-        "\n\n".join(get_chunk_text(c.get("payload", {})) for c in jd_context).strip()
-        or "(JD not available)"
-    )
+    jd_text = (state.get("full_jd_text") or "").strip()
+    if not jd_text:
+        jd_text = (
+            "\n\n".join(get_chunk_text(c.get("payload", {})) for c in jd_context).strip()
+            or "(JD not available)"
+        )
 
     llm = _build_llm(temperature=0.1)
 

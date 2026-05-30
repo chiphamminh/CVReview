@@ -37,6 +37,7 @@ class HRChatState(TypedDict):
     # RAG context
     cv_context: List[Dict[str, Any]]
     jd_context: List[Dict[str, Any]]
+    full_jd_text: Optional[str] 
     retrieval_stats: Dict[str, Any]
 
     # LLM pipeline

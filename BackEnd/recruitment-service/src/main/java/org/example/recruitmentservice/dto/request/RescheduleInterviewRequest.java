@@ -1,5 +1,6 @@
 package org.example.recruitmentservice.dto.request;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.*;
 import java.time.LocalDateTime;
 
@@ -8,6 +9,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @Builder
 public class RescheduleInterviewRequest {
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm")
     private LocalDateTime interviewDate;
     private String customMessage;
 }
