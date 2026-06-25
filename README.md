@@ -1,1334 +1,317 @@
 # CV Review System
-## 1. Introduction
-The CV Review System is an advanced, AI-powered recruitment platform designed to streamline the hiring process for both HR professionals and candidates. By leveraging Large Language Models (LLMs) and Retrieval-Augmented Generation (RAG), the system automates CV screening, provides intelligent ranking, and offers a context-aware chatbot for seamless interaction.
-## 2. Scope of work
-The project will be composed of the following microservices:
+> A microservices-based recruitment platform built on Java/Spring Boot, with asynchronous document-processing pipelines, JWT-secured REST APIs, and a Python/FastAPI RAG layer for AI-assisted candidate evaluation.
 
-- Api-gateway: Single entry (Spring Cloud Gateway) for routing, auth check, rate limiting.
-- Auth-service: user register/login, JWT issuance, refresh tokens, role management, logout.
-- Recruitment-service: Manage recruitment positions (position/JD) and candidate profiles (CV)
-- AI-service: Analyze CV content with AI/LLM, save evaluation results and feedback to the system.
-- Embedding-service: Store and search CV embeddings
-- Chatbot-service: Chatbot service with RAG (OpenAI/Gemini, ChromaDB, LangChain)
+---
 
-Core AI Capabilities:
+## 1. Overview
 
-- AI-Powered CV Analysis & Scoring: Automatically compares CVs against Job Descriptions (JDs) to provide match scores, skill gap analysis, and structured extraction (skills, experience, contact info).
-- Hybrid RAG Chatbot: Built with LangGraph and Qdrant, the chatbot supports specialized modes for HR (candidate screening) and Candidates (career guidance and job matching).
-- Small-to-Big Retrieval: Uses a sophisticated chunking strategy to ensure the LLM (Gemini 2.5 Flash) has precise context from long documents.
-- Automated Workflow: Orchestrates PDF parsing (via LlamaParse), embedding generation, and email notifications for the recruitment lifecycle.
-## 3. API endpoints
-User:
-| email           | name   | phone       | role |
-|-----------------|--------|-------------|----------|
-| can1@gmail.com  | CAN1   | 0000000001  | CANDIDATE |
-| can2@gmail.com  | CAN2   | 0000000002  | CANDIDATE |
-| can3@gmail.com  | CAN3   | 0000000003  | CANDIDATE |
-| hr1@gmail.com   | HR1    | 0000000004  | HR |
-| hr2@gmail.com   | HR2    | 0000000005  | HR |
-| hr3@gmail.com   | HR3    | 0000000006  | HR |
-1. **Auth service**
-- **Login For All**
-  - **Name:** `/login` 
-  - Endpoint: /auth/login
-  - Method: POST
-  - Description: Authenticates the user and returns an accessToken and refreshToken on success.
-  - Request body:
-    ```json
-    {
-	    "phone": "0987654321",
-        "password": "password123"
-    }
-    ```
-  - Response:
-   - Success: 
-     ```json
-        {
-         "data": {
-            "accessToken": "eyJhbGciOiJ...",
-            "refreshToken": "eyJhbGciOiJIUzI...",
-            "account": {
-                 "id": "b42f1fb...b763ab1ea7",
-                 "name": "Nguyen Van A",
-                 "role": "HR"
-            }
-         },
-         "message": "Welcome to CV Review System"
-        }
-      ```
-  - Fail
-   - Missing phone or password:
-     ```json
-        {
-            "statusCode": 1008,
-            "message": "Phone is required",
-            "data": null,
-            "timestamp": "2025-12-03T14:57:01.2784138"
-        }
-     ```
-     ```json 
-        {
-            "statusCode": 1008,
-            "message": "Password is required",
-            "data": null,
-            "timestamp": "2025-12-03T14:57:50.2941723"
-        }
-    ```
-   - Wrong phone or password:
-     ```json
-        {
-            "statusCode": 1003,
-            "message": "User not found",
-            "data": null,
-            "timestamp": "2025-12-03T14:59:00.3273034"
-        }
-    ```
-- **Refresh Token For All**
-- **Name:** `/refresh-token` 
-  - Endpoint: /auth/refresh-token
-  - Method: POST
-  - Description: Refresh access token when it expires using refresh token.
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Request body:
-    ```json
-        {
-	       "refreshToken": "eyJhbGciOiJIUzI..."    
-        }
-    ```
-  - Response:
-   - Success: 
-     ```json
-        {
-           "message": "",
-           "data": {
-                "refreshToken": "eyJhbGciOiJIUzI1Ni...",
-                "accessToken": "eyJhbGciOiJIUzI1..."
-               }
-        }
-      ```
-- **Get User Data For All**
-- **Name:** `/user-detail` 
-  - Endpoint: /auth/user-detail
-  - Method: GET
-  - Description: Get user detail
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Response:
-   - Success: 
-     ```json
-        {
-            "statusCode": 200,
-            "message": "User detail fetched successfully",
-            "data": {
-                "accessToken": "eyJhbGciOiJIUz..MF95Lec4YW48GlVbl4GXdq45_iY",
-                "account": {
-                    "id": "02e0d5f5-bf95-11f0-a427-de261a5dec2c",
-                    "name": " Nguyen Van B",
-                    "email": "vanb@example.com",
-                    "phone": "0123456789",
-                    "role": "CANDIDATE",
-                    "createdAt": "2025-11-12T06:58:36"
-                }
-            },
-            "timestamp": "2025-12-01T17:29:24.8982526"
-        }
-      ```
-    - Fail:
-     - Invalid request
-    ```json
-        {
-            "statusCode": 1007,
-            "message": "Refresh token is required",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-     - Unauthorized
-    ```json
-        {
-            "statusCode": 1001,
-            "message": "Unauthorized",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-     - User not found
-    ```json
-        {
-            "statusCode": 1003,
-            "message": "User not found",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-- **Logout For All**
-- **Name:** `/logout` 
-  - Endpoint: /auth/logout
-  - Method: POST
-  - Description: Logout user and invalidate refresh token.
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | X-User-Id      | <userId>                  | Yes      |
-  - Request body:
-    ```json
-    {
-	    "refreshToken": "eyJhbGciOiJIUzI..."
-    }
-    ```
-  - Response:
-   - Success: 
-     ```json
-        {
-            "statusCode": 200,
-            "message": "Logout successfully",
-            "data": null
-        }
-      ```
-- **Register HR Account For Admin**
-- **Name:** `/admin/hr-accounts` 
-  - Endpoint: /auth/admin/hr-accounts
-  - Method: POST
-  - Description: Admin creates a new HR account.
-  - Request body:
-    ```json
-    {
-        "name": "HR Manager",
-        "email": "hr@example.com",
-        "phone": "0912345678",
-        "password": "password123"
-    }
-    ```
-  - Response:
-   - Success: 
-     ```json
-        {
-            "statusCode": 200,
-            "message": "HR account created successfully",
-            "data": {
-                "id": "uuid",
-                "name": "HR Manager",
-                "email": "hr@example.com",
-                "role": "HR"
-            }
-        }
-      ```
-- **Get User Stats For Admin**
-- **Name:** `/admin/stats/users` 
-  - Endpoint: /auth/admin/stats/users
-  - Method: GET
-  - Description: Get total users count by role.
-  - Response:
-   - Success: 
-     ```json
-        {
-            "statusCode": 200,
-            "message": "User statistics retrieved successfully",
-            "data": {
-                "totalUsers": 100,
-                "totalHr": 10,
-                "totalCandidate": 90
-            }
-        }
-      ```
-2. **Recruitment service**
-- **Create Position For HR**
-  - **Name:** `/positions` 
-  - Endpoint: /positions
-  - Method: POST
-  - Description: Create position with attached JD.
-  - Content-Type:  `multipart/form-data`
+### Context
+In traditional recruitment, HR departments face a severe bottleneck when screening hundreds of CVs for multiple job openings. Conversely, candidates struggle to identify positions that match their actual skills. Keyword-based matching is shallow and fails to capture the semantic complexity of professional experience. 
 
-  - Form Data Parameters:
+### Problem Solved
+The **CV Review System** automates the entire candidate-to-job matchmaking lifecycle. It provides:
+1. **An Internal HR Portal** for managing job positions, uploading CV pools, tracking batch processing status, analyzing candidate match scores, and interacting with an HR Chatbot to generate tailor-made interview questions and send email invites.
+2. **A Candidate Portal** where job seekers upload their Master CV, interact with a Career Counselor Chatbot to find matching roles, view detailed skill gaps/learning paths, and apply directly via chat.
 
-    | Key   | Type   | Required | Value |
-    |-------|--------|----------|---------|
-    | name  | Text | Yes      | Dev     |
-    | language  | Text | Yes      | Java     |
-    | level  | Text | Yes      | Intern     |
-    | file  | File | Yes      | abc.pdf     |
+### My Role
+This project was developed solo as a graduation project. I assumed full ownership of:
+- Designing the decoupled **microservices architecture** using Java/Spring Boot and Python/FastAPI.
+- Implementing the **asynchronous event-driven pipelines** using RabbitMQ.
+- Designing the database schemas in MySQL and vector collections in Qdrant.
+- Engineering the stateful **RAG chatbot agents** using LangGraph, LangChain, and Gemini 2.5 APIs.
+- Setting up the Dockerized deployment configurations.
 
-  - Response:
-    - Success: 
-    ```json
-        {
-            "statusCode": 200,
-            "message": "Success",
-            "data": {
-                "id": 9,
-                "name": "Tester",
-                "language": "",
-                "level": "Fresher",
-                "driveFileUrl": "https://drive.google.com/file/d/1-KllrO-_VQ757MV84seCYfHxbx0ycRJu/view?usp=drivesdk",
-                "createdAt": "2025-10-02T14:13:54.4057562",
-                "updatedAt": "2025-10-02T14:13:54.4057562"
-            },
-            "timestamp": "2025-10-02T14:13:54.5487176"
-        }
-    ```
-    - Fail:
-     - Duplicate position:
-    ```json
-        {
-            "statusCode": 3002,
-            "message": "Position already exists",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-     - File parse fail
-    ```json
-        {
-            "statusCode": 3004,
-            "message": "Failed to parse JD",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-     - File not found
-    ```json
-        {
-            "statusCode": 3003,
-            "message": "File not found",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-     - Fail save file
-    ```json
-        {
-            "statusCode": 3005,
-            "message": "Failed to save file",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-     - Missing name and level
-    ```json
-        {
-            "statusCode": 3006,
-            "message": "Missing name and level",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-- **Filter Position For HR**
-  - **Name:** `/positions` 
-  - Endpoint: /positions
-  - Method: GET
-  - Description: Get position follow name, language, level.
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Query Parameters
-    | Key      | Value   |   
-    |----------|--------|
-    | name     | Dev |    
-    | level    | Intern |   
-  - Response:
-    - Success:
-    ```json
-    {
-        "statusCode": 200,
-        "message": "Success",
-        "data": [
-            {
-                "id": 5,
-                "name": "Developer",
-                "language": "Java",
-                "level": "Intern",
-                "driveFileUrl": "https://drive.google.com/file/d/1-KllrO-_VQ757MV84seCYfHxbx0ycRJu/view?usp=drivesdk",
-                "createdAt": "2025-10-02T14:07:23.751569",
-                "updatedAt": "2025-10-02T14:07:23.751569"
-            },
-            {
-                "id": 7,
-                "name": "Developer",
-                "language": "C#",
-                "level": "Intern",
-                "driveFileUrl": "https://drive.google.com/file/d/1-KllrO-_VQ757MV84seCYfHxbx0ycRJu/view?usp=drivesdk",
-                "createdAt": "2025-10-02T14:11:52.262104",
-                "updatedAt": "2025-10-02T14:11:52.262104"
-            }
-        ],
-        "timestamp": "2025-10-02T15:19:56.363315"
-    }
-    ```
-    - Fail:
-     - Position not found:
-    ```json
-        {
-            "statusCode": 3001,
-            "message": "Position not found",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-- **Search Position For All**
-  - **Name:** `/positions/search` 
-  - Endpoint: /positions/search?keyword={position}
-  - Method: GET
-  - Description: Get position follow name, language, level.
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Query Parameters
-    | Key      | Value   |   
-    |----------|--------|
-    | keyword     | Dev |  
-  - Response:
-    - Success:
-    ```json
-    {
-        "statusCode": 200,
-        "message": "Success",
-        "data": [
-            {
-                "id": 5,
-                "name": "Developer",
-                "language": "Java",
-                "level": "Intern",
-                "driveFileUrl": "https://drive.google.com/file/d/1-KllrO-_VQ757MV84seCYfHxbx0ycRJu/view?usp=drivesdk",
-                "createdAt": "2025-10-02T14:07:23.751569",
-                "updatedAt": "2025-10-02T14:07:23.751569"
-            },
-            {
-                "id": 7,
-                "name": "Developer",
-                "language": "C#",
-                "level": "Intern",
-                "driveFileUrl": "https://drive.google.com/file/d/1-KllrO-_VQ757MV84seCYfHxbx0ycRJu/view?usp=drivesdk",
-                "createdAt": "2025-10-02T14:11:52.262104",
-                "updatedAt": "2025-10-02T14:11:52.262104"
-            }
-        ],
-        "timestamp": "2025-10-02T15:19:56.363315"
-    }
-    ```
-    - Fail:
-     - Position not found:
-    ```json
-        {
-            "statusCode": 3001,
-            "message": "Position not found",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ```
-- **Get JD Text For All**
-- **Name:** `/jd/{positionId}/text` 
-  - Endpoint: /positions/jd/{positionId}/text
-  - Method: GET
-  - Description: Get full job description text for a specific position.
-  - Response:
-    - Success: 
-    ```json
-    {
-        "statusCode": 200,
-        "data": {
-            "id": 5,
-            "name": "Developer",
-            "jobDescription": "Full JD text content..."
-        }
-    }
-    ```
-- **Update Position For HR**
-  - **Name:** `/positions` 
-  - Endpoint: /positions/{positionId}
-  - Method: PATCH
-  - Description: Update position.
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Query Parameters
-    | Key   | Type   | Required | Value |
-    |-------|--------|----------|---------|
-    | name  | Text | No      | Dev     |
-    | language  | Text | No      | Java     |
-    | level  | Text | No      | Intern     |
-    | file  | File | No      | abc.pdf     |
-  - Response:
-    - Success:
-    ```json
-    {
-        "statusCode": 200,
-        "message": "Updated successfully",
-        "data": null,
-        "timestamp": "2025-10-02T15:19:56.363315"
-    }
-    ```
-    - Fail:
-     - Position not found:
-    ```json
-        {
-            "statusCode": 3001,
-            "message": "Position not found",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-     - Duplicate position:
-    ```json
-        {
-            "statusCode": 3002,
-            "message": "Position already exists",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-     - File parse fail
-    ```json
-        {
-            "statusCode": 3004,
-            "message": "Failed to parse JD",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-     - Fail save file
-    ```json
-        {
-            "statusCode": 3005,
-            "message": "Failed to save file",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-     - File move failed
-    ```json
-        {
-            "statusCode": 5002,
-            "message": "File move failed",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-- **Delete Positions For HR**
-  - **Name:** `/positions` 
-  - Endpoint: /positions
-  - Method: DELETE
-  - Description: Delete position.
-  - Content-Type:  `multipart/form-data`
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Request body:
-    ```json
-    {
-	    ["positionIds"]
-    }
-    ```
-  - Response:
-    - Success: 
-    ```json
-        {
-            "statusCode": 200,
-            "message": "Deleted successfully",
-            "data": null,
-            "timestamp": "2025-10-06T15:03:04.0501693"
-        }
-    ```
-    - Fail:
-     - Position not found:
-    ```json
-        {
-            "statusCode": 3001,
-            "message": "Position not found",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-     - Can not delete postion
-    ```json
-        {
-            "statusCode": 3006,
-            "message": "Can not delete position because it contains CVs",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ```
-     - File delete failed
-    ```json
-        {
-            "statusCode": 5001,
-            "message": "File delete failed",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-- **Upload CV For HR**
-  - **Name:** `/upload` 
-  - Endpoint: /upload/hr/cv
-  - Method: POST
-  - Description: Upload CV to store in database
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Query Parameters
-    | Key   | Type   | Required | Value |
-    |-------|--------|----------|---------|
-    | files  | File | Yes      | abc.pdf, def.pdf,...     |
-    | positionId  | Text | Yes      | 1     |
-  - Response:
-    - Success: 
-    ```json
-        {
-            "statusCode": 200,
-            "message": "CV uploaded successfully",
-            "data": {
-                "totalCv": 4,
-                "batchId": "POS5_20251111_B0853",
-                "message": "Your CV has been uploaded successfully and is being processed.",
-                "status": "PROCESSING"
-            },
-            "timestamp": "2025-11-11T07:19:30.007447375"
-        }
-    ```
-    - Fail:
-     - Position not found:
-    ```json
-        {
-            "statusCode": 3001,
-            "message": "Position not found",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-     - File not found
-    ```json
-        {
-            "statusCode": 3003,
-            "message": "File not found",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-     - Fail save file
-    ```json
-        {
-            "statusCode": 3005,
-            "message": "Failed to save file",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-     - Unauthorized action
-    ```json
-        {
-            "statusCode": 1005,
-            "message": "Unauthorized action",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-- **Upload CV For Candidate**
-  - **Name:** `/upload` 
-  - Endpoint: /upload/candidate/cv
-  - Method: POST
-  - Description: Upload CV to store in database
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Query Parameters
-    | Key   | Type   | Required | Value |
-    |-------|--------|----------|---------|
-    | file  | File | Yes      | abc.pdf     |
-  - Response:
-    - Success: 
-    ```json
-        {
-            "statusCode": 200,
-            "message": "CV uploaded successfully",
-            "data": {
-                "totalCv": 1,
-                "batchId": "CAND_20251113_d87bbbbc",
-                "message": "Your CV has been uploaded successfully and is being processed.",
-                "status": "PROCESSING"
-            },
-            "timestamp": "2025-11-11T07:19:30.007447375"
-        }
-    ```
-    - Fail:
-     - File not found
-    ```json
-        {
-            "statusCode": 3003,
-            "message": "File not found",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-     - Fail save file
-    ```json
-        {
-            "statusCode": 3005,
-            "message": "Failed to save file",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-     - Unauthorized action
-    ```json
-        {
-            "statusCode": 1005,
-            "message": "Unauthorized action",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-- **Get All Position For All**
-  - **Name:** `/positions` 
-  - Endpoint: /positions/all
-  - Method: GET
-  - Description: Get all position.
-  - Content-Type:  `multipart/form-data`
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Response:
-    - Success: 
-    ```json
-        {
-            "statusCode": 200,
-            "message": "Fetched all positions successfully",
-            "data": {
-                "content": [
-                    {
-                        "id": 14,
-                        "name": "FrontEnd",
-                        "language": "JavaScript",
-                        "level": "Senior",
-                        "driveFileUrl": "https://drive.google.com/file/d/1-KllrO-_VQ757MV84seCYfHxbx0ycRJu/view?usp=drivesdk",
-                        "createdAt": "2025-10-09T11:00:38.298548"
-                    }
-                    ...
-                    {
-                        "id": 5,
-                        "name": "Developer",
-                        "language": "Java",
-                        "level": "Intern",
-                        "driveFileUrl": "https://drive.google.com/file/d/1-KllrO-_VQ757MV84seCYfHxbx0ycRJu/view?usp=drivesdk",
-                        "createdAt": "2025-10-02T14:07:23.751569"
-                    }
-                ],
-                "pageNumber": 0,
-                "pageSize": 10,
-                "totalElements": 8,
-                "totalPages": 1,
-                "last": true
-        },
-            "timestamp": 2025-10-02T17:15:29.8681381
-        }
-    ```
-- **CV Detail For HR**
-  - **Name:** `/cv` 
-  - Endpoint: /cv/{{cvId}}
-  - Method: GET
-  - Description: Get CV detail.
-  - Content-Type:  `multipart/form-data`
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Response:
-    - Success: 
-    ```json
-        {
-            "statusCode": 200,
-            "message": "CV detail retrieved successfully",
-            "data": {
-                "cvId": 94,
-                "positionId": 15,
-                "positionName": "BackEnd Java Intern",
-                "email": "chi12345pham@gmail.com",
-                "name": "Pham Minh Chi",
-                "score": 96,
-                "feedback": "Exceptional fit...testing and CI/CD.",
-                "skillMatch": "Java, OOP, Spring Boot, RESTful APIs, Microservices, PostgreSQL, MySQL, Git, API Gateway, Service Discovery (Eureka), Redis, Docker, NATS",
-                "skillMiss": "Unit testing (JUnit, Mockito), CI/CD",
-                "status": "SCORED",
-                "driveFileUrl": "https://drive.google.com/file/d/1-KllrO-_VQ757MV84seCYfHxbx0ycRJu/view?usp=drivesdk",
-                "canRetry": false,
-                "updatedAt": "2025-10-27T13:52:23.79455",
-                "parsedAt": "2025-10-21T11:27:10.278149",
-                "scoredAt": "2025-10-27T13:53:57.362199"
-            },
-            "timestamp": "2025-10-27T14:22:08.4658925"
-        }
-    ```
-    - Fail:
-     - CV not found:
-    ```json
-        {
-            "statusCode": 2001,
-            "message": "CV not found",
-            "data": null,
-            "timestamp": "2025-10-13T13:59:43.5713966"
-        }
-    ``` 
-- **Get CVs for specific position For HR**
-  - **Name:** `/cv` 
-  - Endpoint: /cv/position/{positionId}
-  - Method: GET
-  - Description: Get all position.
-  - Content-Type:  `multipart/form-data`
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Response:
-    - Success: 
-    ```json
-        {
-            "statusCode": 200,
-            "message": "Fetched all CVs for position: Tester Python Fresher",
-            "data": {
-                "content": [
-                    {
-                        "cvId": 32,
-                        "positionId": 9,
-                        "positionName": "Developer Java Intern",
-                        "email": "chi12345pham@gmail.com",
-                        "name": "Pham Minh Chi",
-                        "driveFileUrl": "https://drive.google.com/file/d/1-KllrO-_VQ757MV84seCYfHxbx0ycRJu/view?usp=drivesdk",
-                        "status": "PARSED",
-                        "updatedAt": "2025-10-09T15:06:15.270665"
-                    }
-                    ...
-                    {
-                        "cvId": 8,
-                        "positionId": 9,
-                        "positionName": "Developer Java Intern",
-                        "name": "",
-                        "driveFileUrl": "https://drive.google.com/file/d/1-KllrO-_VQ757MV84seCYfHxbx0ycRJu/view?usp=drivesdk",
-                        "status": "PARSED",
-                        "updatedAt": "2025-10-08T14:08:11.816049"
-                    }
-                ],
-                "pageNumber": 0,
-                "pageSize": 10,
-                "totalElements": 7,
-                "totalPages": 1,
-                "last": true
-        },
-            "timestamp": 2025-10-02T17:15:29.8681381
-        }
-    ```
-    - Fail:
-     - Position not found:
-    ```json
-        {
-            "statusCode": 3001,
-            "message": "Position not found",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ```  
-- **Update Candidate CV For All**
-  - **Name:** `/cv` 
-  - Endpoint: /cv/{cvId}
-  - Method: POST
-  - Description: Update candidate CV (name, email or CV file).
-  - Content-Type:  `multipart/form-data`
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Query Parameters
-    | Key   | Type   | Required | Value |
-    |-------|--------|----------|---------|
-    | name  | Text | No      | Pham Minh Chi     |
-    | email  | Text | No      | phamminhchi@gmail.com     |
-    | file  | File | No      | abc.pdf     |
-  - Response:
-    - Success: 
-    ```json
-        {
-            "statusCode": 200,
-            "message": "Updated Candidate CV successfully",
-            "data": null,
-            "timestamp": "2025-10-13T13:52:06.2765845"
-        }
-    ```
-    - Fail:
-     - CV not found:
-    ```json
-        {
-            "statusCode": 2001,
-            "message": "CV not found",
-            "data": null,
-            "timestamp": "2025-10-13T13:59:43.5713966"
-        }
-    ``` 
-     - Fail save file
-    ```json
-        {
-            "statusCode": 3005,
-            "message": "Failed to save file",
-            "data": null,
-            "timestamp": "2025-10-02T17:15:29.8681381"  
-        }
-    ``` 
-- **Update Candidate CV Status For HR**
-  - **Name:** `/cv` 
-  - Endpoint: /cv/{cvId}/{status}
-  - Method: POST
-  - Description: Update candidate CV status (REJECTED or APPROVED).
-  - Content-Type:  `multipart/form-data`
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Response:
-    - Success: 
-    ```json
-        {
-            "statusCode": 200,
-            "message": "Updated Candidate CV status successfully",
-            "data": null,
-            "timestamp": "2025-10-13T13:52:06.2765845"
-        }
-    ```
-    - Fail:
-     - CV not found:
-    ```json
-        {
-            "statusCode": 2001,
-            "message": "CV not found",
-            "data": null,
-            "timestamp": "2025-10-13T13:59:43.5713966"
-        }
-    ``` 
-- **Delete Candidate CVs For All**
-  - **Name:** `/cv` 
-  - Endpoint: /cv
-  - Method: DELETE
-  - Description: Delete candidate CVs.
-  - Content-Type:  `multipart/form-data`
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Request body:
-    ```json
-    {
-	    ["cvIds"]
-    }
-    ```
-  - Response:
-    - Success: 
-    ```json
-        {
-            "statusCode": 200,
-            "message": "Deleted Candidate CV successfully",
-            "data": null,
-            "timestamp": "2025-10-13T13:53:53.9001019"
-        }
-    ```
-    - Fail:
-     - Position not found:
-    ```json
-        {
-            "statusCode": 2001,
-            "message": "CV not found",
-            "data": null,
-            "timestamp": "2025-10-13T13:59:43.5713966"
-        }
-    ``` 
-     - File delete fail
-    ```json
-        {
-            "statusCode": 5001,
-            "message": "File can not delete",
-            "data": null,
-            "timestamp": "2025-10-13T13:59:43.5713966"
-        }
-    ``` 
-- **Analysis CV For HR**
-  - **Name:** `/analysis` 
-  - Endpoint: /analysis
-  - Method: POST
-  - Description: Analysis CV.
-  - Content-Type:  `multipart/form-data`
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Query Parameters
-    | Key   | Required | Value |
-    |-------|----------|---------|
-    | positionId  | Yes      | Pham Minh Chi     |
-    | cvIds  | No      | 1     |
-    ...
-    | cvIds  | No      | n    |
-  - Response:
-    - Success: 
-    ```json
-        {
-            "statusCode": 200,
-            "message": "Batch created successfully",
-            "data": {
-                "totalCv": 4,
-                "batchId": "POS15_20251020_133529",
-                "message": "Please wait a moment. Your CVs are being processed.",
-                "status": "PROCESSING"
-            },
-            "timestamp": "2025-10-20T13:35:30.3444644"
-        }
-    ```
-    - Fail:
-     - Position not found:
-    ```json
-        {
-            "statusCode": 2001,
-            "message": "CV not found",
-            "data": null,
-            "timestamp": "2025-10-13T13:59:43.5713966"
-        }
-    ```
-     - CV not found:
-    ```json
-        {
-            "statusCode": 2001,
-            "message": "CV not found",
-            "data": null,
-            "timestamp": "2025-10-13T13:59:43.5713966"
-        }
-    ``` 
-- **Manual Score For HR**
-  - **Name:** `/analysis` 
-  - Endpoint: /analysis/manual
-  - Method: POST
-  - Description: Manual Score for HR.
-  - Content-Type:  `multipart/form-data`
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Request Body:
-    ```
-    {
-        "cvId": 25,
-        "score": 66,
-        "feedback": "Good",
-        "skillMatch": "Microservice",
-        "skillMiss": "NATS"
-    }
-    ```
-  - Response:
-    - Success: 
-    ```json
-        {
-            "statusCode": 200,
-            "message": "CV scored manually successfully",
-            "data": {
-                "cvId": 95,
-                "positionId": 15,
-                "email": "tranlaluot@gmail.com",
-                "name": "Tran La Luot",
-                "status": "SCORED",
-                "scoredAt": "2025-10-27T15:51:43.6248981"
-            },
-            "timestamp": "2025-10-27T15:51:44.1706388"
-        }
-    ```
-    - Fail:
-     - CV not found:
-    ```json
-        {
-            "statusCode": 2001,
-            "message": "CV not found",
-            "data": null,
-            "timestamp": "2025-10-13T13:59:43.5713966"
-        }
-    ``` 
-     - CV already processing
-    ```json
-        {
-            "statusCode": 2004,
-            "message": "CV already processing",
-            "data": null,
-            "timestamp": "2025-10-13T13:59:43.5713966"
-        }
-    ``` 
-- **Retry Scoring by BatchId For HR**
-  - **Name:** `/analysis` 
-  - Endpoint: /analysis/retry
-  - Method: POST
-  - Description: Retry Score for HR.
-  - Content-Type:  `multipart/form-data`
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Query Parameters
-    | Key   | Type   | Required | Value |
-    |-------|--------|----------|---------|
-    | batchId  | Text | Yes      | POS15_20251027_161615    |
-  - Response:
-    - Success: 
-    ```json
-        {
-            "statusCode": 200,
-            "message": "The retry request was sent successfully. Please wait a moment.",
-            "data": {
-                "batchId": "POS15_20251027_161615",
-                "totalRetried": 8,
-                "failedToRetry": 0,
-                "retriedCvIds": [76, 77, 78, 79, 88, 89, 90, 91],
-                "message": "Queued 16 CVs for retry"
-            },
-            "timestamp": "2025-10-27T16:23:13.6859334"
-        }
-    ```
-    - Fail:
-     - Batch not found:
-    ```json
-        {
-            "statusCode": 6001,
-            "message": "Batch not found",
-            "data": null,
-            "timestamp": "2025-10-13T13:59:43.5713966"
-        }
-    ``` 
-     - No fail CVs in batch
-    ```json
-        {
-            "statusCode": 2006,
-            "message": "No failed CVs in batch",
-            "data": null,
-            "timestamp": "2025-10-13T13:59:43.5713966"
-        }
-    ``` 
-- **Retry Scoring by CvIds For HR**
-  - **Name:** `/analysis` 
-  - Endpoint: /analysis/retryCvs
-  - Method: POST
-  - Description: Retry Score for HR.
-  - Content-Type:  `multipart/form-data`
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
-  - Query Parameters
-    | Key   | Type   | Required | Value |
-    |-------|--------|----------|---------|
-    | cvIds  | Text | Yes      | 1    |
-    | cvIds  | Text | Yes      | 2    |
-    ...
-    | cvIds  | Text | Yes      | n    |
-  - Response:
-    - Success: 
-    ```json
-        {
-            "statusCode": 200,
-            "message": "The retry request was sent successfully. Please wait a moment.",
-            "data": {
-                "batchId": "POS15_20251027_161615",
-                "totalRetried": 2,
-                "failedToRetry": 0,
-                "retriedCvIds": [1, 2],
-                "message": "Queued 2 CVs for retry"
-            },
-            "timestamp": "2025-10-27T16:23:13.6859334"
-        }
-    ```
-    - Fail:
-     - CV not found:
-    ```json
-        {
-            "statusCode": 2001,
-            "message": "CV not found",
-            "data": null,
-            "timestamp": "2025-10-13T13:59:43.5713966"
-        }
-    ``` 
-     - CV not failed:
-    ```json
-        {
-            "statusCode": 2005,
-            "message": "CV not failed",
-            "data": null,
-            "timestamp": "2025-10-13T13:59:43.5713966"
-        }
-    ``` 
-     - CVs not same position:
-    ```json
-        {
-            "statusCode": 2007,
-            "message": "CVs not same position",
-            "data": null,
-            "timestamp": "2025-10-13T13:59:43.5713966"
-        }
-    ``` 
-- **Tracking CV upload/scoring For All**
-  - **Name:** `/tracking` 
-  - Endpoint: /tracking/{{batchId}}/status
-  - Method: GET
-  - Description: Track CV upload/score progress.
-  - Response:
-    - Success: 
-    ```json
-        {
-            "statusCode": 200,
-            "message": "Batch status retrieved successfully",
-            "data": {
-                "batchId": "POS15_20251027_135222",
-                "processedCv": 6,
-                "totalCv": 6,
-                "successCv": 5,
-                "failedCv": 1,
-                "failedCvIds": [
-                    95
-                ],
-                "progress": 100.0,
-                "pending": 0,
-                "status": "COMPLETED",
-                "createdAt": "2025-10-27T13:53:36.094834",
-                "completedAt": "2025-10-27T13:53:57.792611"
-            },
-            "timestamp": "2025-10-27T13:54:07.5327545"
-        }
-    ```
-    - Fail:
-     - Batch not found:
-    ```json
-        {
-            "statusCode": 6001,
-            "message": "Batch not found",
-            "data": null,
-            "timestamp": "2025-10-13T13:59:43.5713966"
-        }
-    ``` 
-- **SSE Stream Progress For All**
-- **Name:** `/tracking` 
-  - Endpoint: /tracking/{batchId}/stream
-  - Method: GET
-  - Description: Real-time progress updates via Server-Sent Events.
-  - Header:
-    | Key            | Value                     | Required |
-    |----------------|---------------------------|----------|
-    | Authorization  | Bearer <accessToken> | Yes      |
+---
 
-- **Admin Analytics - CV Traffic**
-- **Name:** `/admin/analytics/cv-traffic` 
-  - Endpoint: /admin/analytics/cv-traffic
-  - Method: GET
-  - Description: Get CV traffic statistics for the last N days.
-  - Query Params: `days` (Default: 30)
-  - Response:
-    ```json
-    {
-        "statusCode": 200,
-        "data": {
-            "totalCv": 150,
-            "successCv": 120,
-            "failedCv": 10,
-            "processingCv": 20,
-            "days": 30
-        }
-    }
-    ```
-- **Admin Analytics - Processing Time**
-- **Name:** `/admin/analytics/processing-time` 
-  - Endpoint: /admin/analytics/processing-time
-  - Method: GET
-  - Description: Get average processing time by batch size.
-- **Trigger GC For Admin**
-- **Name:** `/admin/analytics/trigger-gc` 
-  - Endpoint: /admin/analytics/trigger-gc
-  - Method: POST
-  - Description: Manually trigger garbage collection for failed CV files.
+## 2. Key Features
 
-#### **Chatbot Public Endpoints**
-- **Get Sessions For All**
-  - Endpoint: /api/chatbot/sessions
-  - Method: GET
-  - Description: Get chat sessions for the current user.
-- **Get Session History For All**
-  - Endpoint: /api/chatbot/sessions/{sessionId}
-  - Method: GET
-  - Description: Get full chat history for a session.
+- **Asynchronous Document Pipelines**: Offloads heavy I/O operations by processing CV/JD files asynchronously. Built with LlamaParse for high-fidelity markdown parsing and RabbitMQ for direct exchange distribution.
+- **Hybrid Retrieval + Two-Stage Scoring**: Combines Dense Vector Search (Cosine Similarity) and Keyword Search on Qdrant, merges results via Reciprocal Rank Fusion (RRF), reranks with a `BAAI/bge-reranker-v2-m3` cross-encoder, then forwards only the filtered top candidates to Gemini for detailed, parallel LLM-based scoring — balancing retrieval recall against LLM cost.
+- **Multi-Dimensional AI Evaluation**: Scores CVs against JDs across *Technical* and *Experience* dimensions using Gemini 2.5 models. It automatically determines fit status (`EXCELLENT_MATCH`, `GOOD_MATCH`, `POTENTIAL`, `POOR_FIT`) and generates customized skill-gap analyses.
+- **LangGraph Agentic Chatbots**: Utilizes stateful LangGraph workflows with specialized intent routers to orchestrate chat flows. Built-in tools allow candidates to submit applications and HR to trigger email templates via SMTP Gmail.
+- **Small-to-Big Retrieval & Data Isolation**: Stores compact vector embeddings and metadata keys in Qdrant, dynamically pulling raw texts from MySQL via secure internal APIs during the LLM reasoning stage.
+- **Real-Time Communication**: Integrates Server-Sent Events (SSE) to stream chatbot response tokens and broadcast document batch processing progress.
+- **Benchmarked RAG Quality, Not Just Built It**: Ran a controlled retrieval/scoring experiment (20 CVs vs. 1 JD) comparing AI output to manual HR ranking — measured `Precision@5 = 60%` at the retrieval stage and an average scoring error of only ~4 points (out of 100) once retrieval was correct, isolating the retrieval reranker — not the LLM scorer — as the main bottleneck to fix next.
+- **System Metrics**:
+  - **4 core microservices + 1 API Gateway + 1 shared library**, communicating over REST and RabbitMQ.
+  - **50+ REST & stream endpoints** across all services.
+  - **10 JPA-managed tables across 2 service-owned MySQL databases** (`auth_db`, `recruitment_db`) — a deliberate database-per-service boundary.
+  - **10–25 seconds** average LlamaParse latency per CV (fully decoupled from the synchronous HTTP thread — see Challenge 1 below).
+  - **~2–4 seconds** for Gemini-based metadata extraction, and **~3–5 seconds** for parallel multi-item scoring (measured 3.1s for 5 candidates, 4.6s for 5 job positions).
 
-#### **Chatbot Internal Endpoints (Internal Service Only)**
-- **Create Session**
-  - Endpoint: /internal/chatbot/session
-  - Method: POST
-- **Save Message**
-  - Endpoint: /internal/chatbot/message
-  - Method: POST
-- **Notify Interview**
-  - Endpoint: /internal/chatbot/notify/interview
-  - Method: POST
+---
 
-#### **Chunking Endpoints**
-- **Chunk CV**
-  - Endpoint: /chunking
-  - Method: POST
-- **Chunk JD**
-  - Endpoint: /chunking/jd
-  - Method: POST
+## 3. System Architecture
 
-3. **Chatbot service (FastAPI - Port 8085)**
-- **Candidate Session**
-  - Endpoint: /chatbot/candidate/session
-  - Method: POST
-- **Candidate Chat**
-  - Endpoint: /chatbot/candidate/chat
-  - Method: POST
-- **HR Session**
-  - Endpoint: /chatbot/hr/session
-  - Method: POST
-- **HR Chat**
-  - Endpoint: /chatbot/hr/chat
-  - Method: POST
+The system follows a microservices topology with **two independently-owned MySQL databases** (`auth_db`, `recruitment_db`) — a deliberate database-per-service boundary. External traffic enters through a Spring Cloud Gateway, which validates JWTs and routes requests either to the Java services (`auth-service`, `recruitment-service`) or, for AI-related calls, onward to the Python services (`embedding-service`, `chatbot-service`). Long-running document operations never block the request thread — they're handed off to RabbitMQ and processed asynchronously by dedicated workers.
 
-4. **Embedding service (FastAPI - Port 8084)**
-- **Delete CV Embeddings**
-  - Endpoint: /cv/{cv_id}
-  - Method: DELETE
-- **Delete JD Embeddings**
-  - Endpoint: /jd/{position_id}
-  - Method: DELETE
-- **Collection Info**
-  - Endpoint: /collections/info
-  - Method: GET
+### Overall Topology
+![Overall System Architecture](docs/images/structure.jpg)
 
-## 5. Authentication & Authorization Errors
-| httpStatus | code | identifier              | message                                                     |
-| ---------- | ---- | ----------------------- | ----------------------------------------------------------- |
-| 401        | 1001 | UNAUTHORIZED            | Unauthorized                                                |
-| 403        | 1002 | FORBIDDEN               | Forbidden                                                   |
-| 404        | 1003 | USER_NOT_FOUND          | User not found                                              |
-| 400        | 1004 | INVALID_CREDENTIALS     | Invalid username or password                                |
-| 401        | 1005 | UNAUTHORIZED_ACTION     | Unauthorized action                                         |
-| 400        | 1006 | INVALID_EMAIL           | Invalid email                                               |
-| 400        | 1007 | INVALID_REQUEST         | Refresh token is required                                   |
-| 400        | 1008 | MISSING_REQUIRED_FIELD  | Required field is missing                                   |
-| 500        | 1009 | JWT_GENERATION_FAILED   | Failed to generate JWT token                                |
-| 401        | 1010 | REFRESH_TOKEN_EXPIRED   | Refresh token has expired, please login again               |
-| 400        | 1011 | REFRESH_TOKEN_INVALID   | Invalid refresh token                                       |
-| 404        | 1012 | REFRESH_TOKEN_NOT_FOUND | Refresh token not found                                     |
-| 500        | 1013 | INTERNAL_SERVER_ERROR   | Internal server error                                       |
-| 401        | 1014 | TOKEN_INVALID           | Invalid token format                                        |
-| 401        | 1015 | TOKEN_EXPIRED           | Token has expired. Please refresh your token or login again |
-| 401        | 1016 | TOKEN_MISSING           | Authorization token is required                             |
+### CV Upload & Ingestion Pipeline (Asynchronous, Event-Driven)
+Parse → Chunk → Embed, decoupled via RabbitMQ so the HTTP thread returns immediately while LlamaParse/embedding workers process each file in the background.
+![CV Upload Pipeline](docs/images/uploadCV.jpg)
 
+### HR Chatbot — Search, Evaluate & Schedule
+Hybrid retrieval (dense + keyword search on Qdrant, RRF-fused, cross-encoder reranked) feeding into parallel Gemini scoring, used when HR searches for or ranks candidates via chat.
+![HR Chatbot Pipeline](docs/images/HRChatbot.png)
 
-    
-    
+### Candidate Chatbot — Job Matching & Application
+Matches a candidate's Master CV against all active JDs, blocks applications below a position's minimum fit score, and explains the skill gap when a candidate is rejected.
+![Candidate Chatbot Pipeline](docs/images/CandidateChatbot.png)
 
- 
-   
+---
+
+## 4. Tech Stack
+
+| Layer | Component / Technology | Version | Purpose |
+| :--- | :--- | :--- | :--- |
+| **Gateway & Route** | Spring Cloud Gateway | 2025.0.0 | Single entry point, JWT verification, rate limiting, and routing |
+| **Backend Services** | Java / Spring Boot | 21 / 3.5.11 | Core business logic, JPA Hibernate, Virtual Threads for high-concurrency I/O |
+| **AI Services** | Python / FastAPI | 3.11 / 0.109+ | Chatbot server, document ingestion API, and vector worker |
+| **Agentic Framework** | LangGraph & LangChain | 0.2.x | Stateful multi-agent chatbot modeling and RAG flow orchestration |
+| **Large Language Models** | Gemini 2.5 Pro / Flash | v1beta | Flash for general chat/metadata extraction; Pro for high-guardrail application scoring |
+| **Embeddings & Rerank** | BAAI/bge-small-en-v1.5 / BAAI/bge-reranker-v2-m3 | - | 384-dimensional text embeddings and multilingual cross-encoder reranking |
+| **Frontend** | ReactJS (Vite) | - | SPA for HR Portal & Candidate Portal; Recharts for dashboards, Zustand for global state |
+| **Relational Database** | MySQL | 8.0 | Manages relational data (Users, Positions, Batches, Chat History) |
+| **Vector Database** | Qdrant | Cloud / Local | Stores and performs high-speed Cosine Similarity searches on CV/JD vectors |
+| **Message Broker** | RabbitMQ | 3-management | Handles asynchronous microservice communications, DLQ, and retry loops |
+| **Integrations** | Google Drive / LlamaParse | - | PDF/Docx storage and intelligent markdown conversion |
+
+---
+
+## 5. API Documentation
+
+Here are three key endpoints representing gateway-routed endpoints and secure internal APIs.
+
+### 1. Batch CV Upload for HR (`Gateway Route`)
+HR uploads multiple candidate CVs against a specific Position ID. The process is fully asynchronous.
+
+- **Method**: `POST`
+- **Path**: `/upload/hr/cv`
+- **Headers**:
+  - `Authorization`: `Bearer <JWT_ACCESS_TOKEN>`
+  - `Content-Type`: `multipart/form-data`
+- **Form Data**:
+  - `files`: `List<MultipartFile>` (CV files: PDF, Docx)
+  - `positionId`: `Integer` (Target job ID)
+- **Response**:
+```json
+{
+  "statusCode": 200,
+  "message": "Batch created successfully",
+  "data": {
+    "batchId": "POS9_20260625_B9d2a",
+    "message": "Please wait a moment. Your CVs are being processed.",
+    "totalCv": 5,
+    "successCount": 5,
+    "status": "PROCESSING"
+  },
+  "timestamp": "2026-06-25T15:09:07.123"
+}
+```
+
+### 2. Stream Candidate Chatbot Response (`Gateway Route`)
+Streams Career Counselor response tokens to the candidate via Server-Sent Events (SSE).
+
+- **Method**: `POST`
+- **Path**: `/chatbot/candidate/chat/stream`
+- **Headers**:
+  - `Authorization`: `Bearer <JWT_ACCESS_TOKEN>`
+  - `Content-Type`: `application/json`
+- **Request Body**:
+```json
+{
+  "session_id": "402e1c95-3b95-46ae-84fd-8d6b2f243b26",
+  "query": "Tìm các công việc Backend liên quan đến Java Spring Boot và Docker cho tôi.",
+  "candidate_id": "usr_cand_001",
+  "cv_id": 12
+}
+```
+- **Response** (HTTP 200, `text/event-stream`):
+```text
+data: {"status": "Đang tải lịch sử phiên..."}
+
+data: {"status": "Đang tìm kiếm thông tin liên quan..."}
+
+data: {"status": "Đang phân tích và tổng hợp kết quả..."}
+
+...
+data: {"done": true, "metadata": {"matched_positions": [9, 15]}, "fallback_answer": "Dựa trên CV của bạn..."}
+```
+
+### 3. Application Finalization (`Internal Service Endpoint`)
+Secure API called by `chatbot-service` to write final match scores and establish applications.
+
+- **Method**: `POST`
+- **Path**: `/internal/chatbot/finalize-application`
+- **Headers**:
+  - `X-Internal-Service`: `chatbot-service` (Internal authentication secret)
+  - `Content-Type`: `application/json`
+- **Request Body**:
+```json
+{
+  "candidateId": "usr_cand_001",
+  "positionId": 9,
+  "chatSessionId": "402e1c95-3b95-46ae-84fd-8d6b2f243b26",
+  "technicalScore": 87,
+  "experienceScore": 82,
+  "overallStatus": "EXCELLENT_MATCH",
+  "aiAssessment": "Ứng viên có nền tảng vững chắc về Spring Boot và Docker, khớp 90% yêu cầu kỹ thuật của vị trí.",
+  "learningPath": "Bổ sung kiến thức nâng cao về Kubernetes để tối ưu hóa quy trình deployment."
+}
+```
+- **Response**:
+```json
+{
+  "statusCode": 200,
+  "message": "Application finalized",
+  "data": {
+    "applicationId": 45,
+    "candidateId": "usr_cand_001",
+    "positionId": 9,
+    "stage": "APPLIED"
+  }
+}
+```
+
+---
+
+## 6. Database Schema
+
+The relational schema is split across two service-owned MySQL databases: `auth_db` (users, refresh tokens, OTP verification — owned by `auth-service`) and `recruitment_db` (positions, candidate CVs, AI analysis, chat history — owned by `recruitment-service`). Below is the logical-level ERD.
+
+![Database Schema](docs/images/dbschema.jpg)
+
+### Key ENUM Reference
+
+| Field | Possible Values |
+| :--- | :--- |
+| `users.role` | `HR`, `CANDIDATE` |
+| `candidate_cv.source_type` | `INTERNAL`, `EXTERNAL` |
+| `candidate_cv.cv_status` | `PENDING`, `EXTRACTING`, `EXTRACTED`, `CHUNKING`, `EMBEDDING`, `EMBEDDED`, `FAILED` |
+| `candidate_cv.recruitment_stage` | `APPLIED`, `INTERVIEW_SCHEDULED`, `INTERVIEWED`, `OFFER`, `ACCEPTED`, `REJECTED` |
+| `cv_analysis.overall_status` | `EXCELLENT_MATCH`, `GOOD_MATCH`, `POTENTIAL`, `POOR_FIT` |
+| `positions.status` | `PENDING`, `PARSING`, `PARSED`, `EMBEDDING`, `EMBEDDED`, `FAILED` |
+| `processing_batch.status` | `PROCESSING`, `COMPLETED`, `FAILED` |
+| `processing_batch.type` | `CV_UPLOAD`, `JD_UPLOAD` |
+| `chat_session.chatbot_type` | `HR`, `CANDIDATE` |
+| `chat_session.mode` | `INTERNAL`, `EXTERNAL` |
+| `chat_history.role` | `USER`, `ASSISTANT` |
+| `otp_tokens.purpose` | `REGISTRATION`, `RESET_PASSWORD` |
+
+---
+
+## 7. Technical Challenges & Decisions
+
+Here are the key engineering decisions implemented in the codebase to guarantee performance, prevent resource starvation, and optimize RAG retrieval:
+
+### Challenge 1: Connection Pool Exhaustion under Long-Running External I/O
+- **Problem**: In Spring Boot, methods annotated with `@Transactional` hold a database connection from the HikariCP pool. When processing CVs, `LlamaParseClient#parseCV` calls LlamaParse APIs and polls for results. This polling takes **15 to 75 seconds** depending on the document size. If this method is transactional, the database connection is held open during the entire network polling period. Under moderate concurrency, the connection pool is starved, causing the entire API Gateway/microservice ecosystem to freeze.
+- **Solution**: Removed `@Transactional` from the main `parseCV` entry method in [LlamaParseClient.java](file:///d:/CVReview/BackEnd/recruitment-service/src/main/java/org/example/recruitmentservice/client/LlamaParseClient.java#L76-L140). The process was refactored into **two short, isolated transactions**:
+  1. `markCvAsParsing()` (T1): Fetches and updates the status to `EXTRACTING`, committing immediately.
+  2. *Network Call*: The file is downloaded, uploaded to LlamaParse, and polled (executed completely outside any database transaction).
+  3. `saveParsedCvResult()` (T2): Commits the markdown content and updates status to `EXTRACTED` in a microtransaction.
+  - *Result*: Database connection hold-time was cut down from **~45s to <50ms** per file, enabling high-concurrency ingestion.
+
+### Challenge 2: Context Fragmentation & Semantic Loss in RAG Vector Retrieval
+- **Problem**: Standard RAG splitters (like Recursive Character Text Splitter) divide text purely by token count. In a CV, this breaks project descriptions across chunk boundaries, causing the embedding model to lose vital associations (e.g., matching a technology used in Project A with its specific role). 
+- **Solution**: Implemented a semantic **Hybrid Chunking Strategy** combined with **Context Enrichment** in [HybridChunkingStrategy.java](file:///d:/CVReview/BackEnd/recruitment-service/src/main/java/org/example/recruitmentservice/services/chunking/strategy/HybridChunkingStrategy.java):
+  - **Section-based parsing**: Splits documents at logical markdown headers (`## Experience`, `## Skills`).
+  - **Entity-based extraction**: For the `PROJECTS` section, the code extracts individual project entities to keep their descriptions whole.
+  - **Context Enrichment**: Prepends crucial candidate metadata (Name, Core Skills, Experience Years) directly to the text of *every single chunk* before embedding.
+  - **Executive Summary Chunk**: Generates a summarized overview as Chunk 0.
+  - *Result*: Prevents context fragmentation, ensuring the embedding model retains global candidate profiles.
+
+### Challenge 3: High Latency & Resource Cost in Multi-JD Job Matching
+- **Problem**: When a candidate searches for matching jobs, their CV must be evaluated against all active Job Descriptions (JDs). Evaluating them sequentially via an LLM takes too long (e.g., 5 JDs × 3s = 15s latency) and consumes excessive API costs.
+- **Solution**: Engineered a parallel evaluation flow in Python's [scoring.py](file:///d:/CVReview/BackEnd/chatbot-service/app/rag/candidate/nodes/scoring.py) using `asyncio.gather` and model tiering:
+  - **Parallel Concurrency**: Asynchronously scores all filtered JDs in parallel, keeping total API latency under **5 seconds** regardless of the number of JDs (measured ~4.6s for 5 JDs vs. an estimated ~15s if scored sequentially).
+  - **Model Tiering**: The intent router categorizes queries. When performing a standard search (`JD_SEARCH`), it uses the fast and cost-effective `gemini-2.5-flash` model. Only when a candidate finalizes an application (`APPLY`), where scoring accuracy acts as a critical gateway (minimum score of 70), does it call the more powerful `gemini-2.5-pro` model.
+  - *Result*: Reduced LLM token costs by over 60% while maintaining high accuracy for critical operations.
+
+---
+
+## 8. Getting Started
+
+### Prerequisites
+- **Docker Desktop** 24.x+ & **Docker Compose** 2.x+ — all backend runtimes (Java 21, Python 3.11, MySQL, RabbitMQ, Qdrant) are bundled inside the Docker images, so a local JDK/Python install isn't required just to run the system.
+- **Node.js** 18+ & npm — to run the React frontend.
+- **Git**
+- API keys/accounts: Gemini, LlamaParse, a Google Drive folder, and Qdrant (Cloud or local).
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/chiphamminh/CVReview.git
+cd CVReview
+```
+
+### 2. Configure environment variables
+All backend services share a single `.env` file at the root of `BackEnd/`, consumed by Docker Compose.
+```bash
+cd BackEnd
+cp .env.example .env
+```
+Open `.env` and fill in your own values, e.g.:
+```properties
+DB_URL=jdbc:mysql://mysql:3306/recruitment_db
+DB_USERNAME=root
+DB_PASSWORD=password
+LLAMAPARSE_API_KEY=your_llamaparse_key
+GEMINI_API_KEY=your_gemini_key
+RABBITMQ_USERNAME=guest
+RABBITMQ_PASSWORD=guest
+FOLDER_ID=your_google_drive_folder_id
+QDRANT_URL=https://your-cluster.qdrant.io
+QDRANT_API_KEY=your_qdrant_key
+CHATBOT_INTERNAL_SECRET=chatbot-service
+```
+> ⚠️ Never commit `.env` — it's already excluded via `.gitignore`.
+
+### 3. Start the backend
+From `BackEnd/`:
+
+**Option A — pull pre-built images (fastest):**
+```bash
+docker-compose up -d
+```
+**Option B — build from local source:**
+```bash
+docker-compose -f docker-compose-build.yml up -d --build
+```
+
+Either option will pull/build and start every container — `mysql`, `rabbitmq`, `qdrant` (if running locally), `auth-service`, `recruitment-service`, `embedding-service`, `chatbot-service`, and `api-gateway` — in dependency order on the `cv-review-network` bridge.
+
+Check that everything is healthy:
+```bash
+docker-compose ps   # all services should show "Up"
+```
+
+### 4. Start the frontend
+```bash
+cd ../FrontEnd
+npm install
+npm run dev
+```
+
+### 5. Access the system
+
+| Interface | URL |
+| :--- | :--- |
+| Candidate / HR Portal | http://localhost:5173 |
+| RabbitMQ Management UI | http://localhost:15672 (user: `guest` / pass: `guest`) |
+| Qdrant Dashboard | http://localhost:6333/dashboard |
+
+### Stop the system
+```bash
+docker-compose down       # stop, keep data
+docker-compose down -v    # stop and wipe all volumes
+```
+
+---
+
+## 9. Future Improvements
+
+1. **Distributed Caching Layer (Redis)**: Integrate Redis to cache frequently requested Job Details and candidate fit scores. This will also allow us to blacklist logged-out JWT tokens at the API Gateway level.
+2. **Kubernetes Orchestration**: Create Helm charts and Kubernetes manifests to automate deployments, scaling, and rollouts of the microservices.
+3. **Self-Hosted Vector DB Cluster**: Transition Qdrant to a self-hosted on-premise cluster to enhance data privacy and comply with strict corporate GDPR policies regarding candidate PII (Personally Identifiable Information).

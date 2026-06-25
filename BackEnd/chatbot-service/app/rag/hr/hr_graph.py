@@ -219,7 +219,6 @@ class HRChatbot:
             "function_calls":             None,
             "final_answer":               "",
             "metadata":                   {},
-            # Sprint 2 — Router + Expansion fields
             "pipeline_strategy":          "",
             "query_intent":               "",
             "query_entities":             {},

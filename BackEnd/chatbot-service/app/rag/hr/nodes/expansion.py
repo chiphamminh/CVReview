@@ -56,7 +56,7 @@ async def query_expansion_node(state: HRChatState) -> HRChatState:
         print(f"[HR Expansion] strategy={strategy} | keywords=[] → skipped (no keyword leg benefit)")
         return state
 
-    # F8: Skip expansion for simple queries — short query with explicit skill keywords
+    # Skip expansion for simple queries — short query with explicit skill keywords
     # already provides a precise signal; LLM synonyms add noise more than recall.
     if len(query.split()) <= 5 and len(skill_keywords) >= 1:
         state["expanded_query"] = query
