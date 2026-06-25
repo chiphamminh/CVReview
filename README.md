@@ -46,19 +46,19 @@ This project was developed solo as a graduation project. I assumed full ownershi
 The system follows a microservices topology with **two independently-owned MySQL databases** (`auth_db`, `recruitment_db`) — a deliberate database-per-service boundary. External traffic enters through a Spring Cloud Gateway, which validates JWTs and routes requests either to the Java services (`auth-service`, `recruitment-service`) or, for AI-related calls, onward to the Python services (`embedding-service`, `chatbot-service`). Long-running document operations never block the request thread — they're handed off to RabbitMQ and processed asynchronously by dedicated workers.
 
 ### Overall Topology
-![Overall System Architecture](docs/images/structure.jpg)
+![Overall System Architecture](images/structure.jpg)
 
 ### CV Upload & Ingestion Pipeline (Asynchronous, Event-Driven)
 Parse → Chunk → Embed, decoupled via RabbitMQ so the HTTP thread returns immediately while LlamaParse/embedding workers process each file in the background.
-![CV Upload Pipeline](docs/images/uploadCV.jpg)
+![CV Upload Pipeline](images/uploadCV.jpg)
 
 ### HR Chatbot — Search, Evaluate & Schedule
 Hybrid retrieval (dense + keyword search on Qdrant, RRF-fused, cross-encoder reranked) feeding into parallel Gemini scoring, used when HR searches for or ranks candidates via chat.
-![HR Chatbot Pipeline](docs/images/HRChatbot.png)
+![HR Chatbot Pipeline](images/HRChatbot.png)
 
 ### Candidate Chatbot — Job Matching & Application
 Matches a candidate's Master CV against all active JDs, blocks applications below a position's minimum fit score, and explains the skill gap when a candidate is rejected.
-![Candidate Chatbot Pipeline](docs/images/CandidateChatbot.png)
+![Candidate Chatbot Pipeline](images/CandidateChatbot.png)
 
 ---
 
@@ -181,7 +181,7 @@ Secure API called by `chatbot-service` to write final match scores and establish
 
 The relational schema is split across two service-owned MySQL databases: `auth_db` (users, refresh tokens, OTP verification — owned by `auth-service`) and `recruitment_db` (positions, candidate CVs, AI analysis, chat history — owned by `recruitment-service`). Below is the logical-level ERD.
 
-![Database Schema](docs/images/dbschema.jpg)
+![Database Schema](images/dbschema.jpg)
 
 ### Key ENUM Reference
 
